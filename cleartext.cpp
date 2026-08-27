@@ -1,3 +1,5 @@
+// Created by Jason Hall
+
 #include <wx/wx.h>
 #include <wx/notebook.h>
 #include <wx/filename.h>
