@@ -7,6 +7,7 @@
 #include <wx/fdrepdlg.h>
 #include <wx/snglinst.h>
 #include <wx/ipc.h>
+#include <vector>
 
 // Simple printout that paginates plain text across pages using the
 // device context's own text-measurement, so it scales to any paper size.
@@ -107,8 +108,11 @@ private:
 
 static void SetCommonStyleDefaults(wxStyledTextCtrl *stc)
 {
-    stc->StyleSetFont(wxSTC_STYLE_DEFAULT,
-        wxFont(10, wxFONTFAMILY_TELETYPE, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL));
+    // Named lvalue: some wx builds (e.g. mingw wx 3.0) declare
+    // StyleSetFont(int, wxFont&) as a non-const reference, which can't
+    // bind to a temporary.
+    wxFont editorFont(10, wxFONTFAMILY_TELETYPE, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL);
+    stc->StyleSetFont(wxSTC_STYLE_DEFAULT, editorFont);
     stc->StyleSetForeground(wxSTC_STYLE_DEFAULT, *wxBLACK);
     stc->StyleClearAll(); // propagates STYLE_DEFAULT (font/color) to every style
 }
@@ -313,6 +317,14 @@ public:
     // it can be called for files passed on the command line.
     void OpenFilePath(const wxString &path)
     {
+        if (!wxFileExists(path))
+        {
+            // No file there yet — open a blank tab pointed at this path so
+            // Save writes it there directly, rather than erroring out.
+            AddTab(wxFileName(path).GetFullName(), "", path);
+            return;
+        }
+
         wxString content;
         wxFile file(path);
         if (file.IsOpened())
