@@ -99,6 +99,118 @@ private:
     float m_scale = 1.0f;
 };
 
+// ============================================================================
+// SYNTAX HIGHLIGHTING (Scintilla built-in lexers, chosen by file extension)
+// ============================================================================
+
+static void SetCommonStyleDefaults(wxStyledTextCtrl *stc)
+{
+    stc->StyleSetFont(wxSTC_STYLE_DEFAULT,
+        wxFont(10, wxFONTFAMILY_TELETYPE, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL));
+    stc->StyleSetForeground(wxSTC_STYLE_DEFAULT, *wxBLACK);
+    stc->StyleClearAll(); // propagates STYLE_DEFAULT (font/color) to every style
+}
+
+static void ApplyPlainText(wxStyledTextCtrl *stc)
+{
+    stc->SetLexer(wxSTC_LEX_NULL);
+    SetCommonStyleDefaults(stc);
+}
+
+static void ApplyCppStyles(wxStyledTextCtrl *stc)
+{
+    stc->SetLexer(wxSTC_LEX_CPP);
+    SetCommonStyleDefaults(stc);
+
+    stc->SetKeyWords(0,
+        "if else for while do return break continue switch case default "
+        "class struct public private protected namespace using template "
+        "typename const static virtual override new delete nullptr enum "
+        "union sizeof this throw try catch friend inline operator explicit "
+        "extern auto volatile unsigned signed short long void int float "
+        "double char bool true false import export function var let");
+
+    stc->StyleSetForeground(wxSTC_C_COMMENT, wxColour(0, 128, 0));
+    stc->StyleSetForeground(wxSTC_C_COMMENTLINE, wxColour(0, 128, 0));
+    stc->StyleSetForeground(wxSTC_C_COMMENTDOC, wxColour(0, 128, 0));
+    stc->StyleSetForeground(wxSTC_C_COMMENTLINEDOC, wxColour(0, 128, 0));
+    stc->StyleSetForeground(wxSTC_C_NUMBER, wxColour(200, 90, 0));
+    stc->StyleSetForeground(wxSTC_C_STRING, wxColour(163, 21, 21));
+    stc->StyleSetForeground(wxSTC_C_CHARACTER, wxColour(163, 21, 21));
+    stc->StyleSetForeground(wxSTC_C_STRINGEOL, wxColour(163, 21, 21));
+    stc->StyleSetForeground(wxSTC_C_PREPROCESSOR, wxColour(128, 0, 128));
+    stc->StyleSetForeground(wxSTC_C_WORD, wxColour(0, 0, 200));
+    stc->StyleSetBold(wxSTC_C_WORD, true);
+    stc->StyleSetForeground(wxSTC_C_WORD2, wxColour(0, 100, 100));
+    stc->StyleSetForeground(wxSTC_C_OPERATOR, wxColour(80, 80, 80));
+}
+
+static void ApplyPythonStyles(wxStyledTextCtrl *stc)
+{
+    stc->SetLexer(wxSTC_LEX_PYTHON);
+    SetCommonStyleDefaults(stc);
+
+    stc->SetKeyWords(0,
+        "False None True and as assert async await break class continue "
+        "def del elif else except finally for from global if import in is "
+        "lambda nonlocal not or pass raise return try while with yield");
+
+    stc->StyleSetForeground(wxSTC_P_COMMENTLINE, wxColour(0, 128, 0));
+    stc->StyleSetForeground(wxSTC_P_COMMENTBLOCK, wxColour(0, 128, 0));
+    stc->StyleSetForeground(wxSTC_P_NUMBER, wxColour(200, 90, 0));
+    stc->StyleSetForeground(wxSTC_P_STRING, wxColour(163, 21, 21));
+    stc->StyleSetForeground(wxSTC_P_CHARACTER, wxColour(163, 21, 21));
+    stc->StyleSetForeground(wxSTC_P_TRIPLE, wxColour(163, 21, 21));
+    stc->StyleSetForeground(wxSTC_P_TRIPLEDOUBLE, wxColour(163, 21, 21));
+    stc->StyleSetForeground(wxSTC_P_WORD, wxColour(0, 0, 200));
+    stc->StyleSetBold(wxSTC_P_WORD, true);
+    stc->StyleSetForeground(wxSTC_P_CLASSNAME, wxColour(0, 100, 100));
+    stc->StyleSetBold(wxSTC_P_CLASSNAME, true);
+    stc->StyleSetForeground(wxSTC_P_DEFNAME, wxColour(0, 100, 100));
+    stc->StyleSetBold(wxSTC_P_DEFNAME, true);
+    stc->StyleSetForeground(wxSTC_P_OPERATOR, wxColour(80, 80, 80));
+    stc->StyleSetForeground(wxSTC_P_DECORATOR, wxColour(128, 0, 128));
+}
+
+static void ApplyMarkupStyles(wxStyledTextCtrl *stc, bool isXml)
+{
+    stc->SetLexer(isXml ? wxSTC_LEX_XML : wxSTC_LEX_HTML);
+    SetCommonStyleDefaults(stc);
+
+    stc->StyleSetForeground(wxSTC_H_TAG, wxColour(0, 0, 200));
+    stc->StyleSetBold(wxSTC_H_TAG, true);
+    stc->StyleSetForeground(wxSTC_H_TAGEND, wxColour(0, 0, 200));
+    stc->StyleSetForeground(wxSTC_H_ATTRIBUTE, wxColour(200, 90, 0));
+    stc->StyleSetForeground(wxSTC_H_ATTRIBUTEUNKNOWN, wxColour(200, 90, 0));
+    stc->StyleSetForeground(wxSTC_H_DOUBLESTRING, wxColour(163, 21, 21));
+    stc->StyleSetForeground(wxSTC_H_SINGLESTRING, wxColour(163, 21, 21));
+    stc->StyleSetForeground(wxSTC_H_COMMENT, wxColour(0, 128, 0));
+    stc->StyleSetForeground(wxSTC_H_ENTITY, wxColour(128, 0, 128));
+    stc->StyleSetForeground(wxSTC_H_NUMBER, wxColour(200, 90, 0));
+}
+
+// Picks a lexer + color palette based on the file's extension; falls back
+// to plain, unstyled text for unrecognized or missing extensions.
+static void ApplyHighlighting(wxStyledTextCtrl *stc, const wxString &filePath)
+{
+    wxString ext = filePath.IsEmpty() ? "" : wxFileName(filePath).GetExt().Lower();
+
+    if (ext == "c" || ext == "cpp" || ext == "cc" || ext == "cxx" ||
+        ext == "h" || ext == "hpp" || ext == "hxx" ||
+        ext == "java" || ext == "js" || ext == "cs")
+        ApplyCppStyles(stc);
+    else if (ext == "py")
+        ApplyPythonStyles(stc);
+    else if (ext == "html" || ext == "htm")
+        ApplyMarkupStyles(stc, false);
+    else if (ext == "xml")
+        ApplyMarkupStyles(stc, true);
+    else
+        ApplyPlainText(stc);
+
+    stc->Colourise(0, -1); // force a full re-lex now that styles/keywords changed
+}
+
 enum
 {
     ID_NewTab = wxID_HIGHEST + 1,
@@ -148,6 +260,10 @@ public:
         wxMenu *viewMenu = new wxMenu();
         wxMenuItem *wordWrapItem = viewMenu->AppendCheckItem(ID_WordWrap, "Word Wrap");
         wordWrapItem->Check(true);
+        viewMenu->AppendSeparator();
+        viewMenu->Append(wxID_ZOOM_IN, "Zoom In\tCtrl+=");
+        viewMenu->Append(wxID_ZOOM_OUT, "Zoom Out\tCtrl+-");
+        viewMenu->Append(wxID_ZOOM_100, "Reset Zoom\tCtrl+0");
         menuBar->Append(viewMenu, "&View");
 
         wxMenu *helpMenu = new wxMenu();
@@ -179,6 +295,9 @@ public:
         Bind(wxEVT_MENU, &NotepadFrame::OnFindNext, this, ID_FindNext);
         Bind(wxEVT_MENU, &NotepadFrame::OnToggleWrapAround, this, ID_WrapAround);
         Bind(wxEVT_MENU, &NotepadFrame::OnToggleWordWrap, this, ID_WordWrap);
+        Bind(wxEVT_MENU, &NotepadFrame::OnZoomIn, this, wxID_ZOOM_IN);
+        Bind(wxEVT_MENU, &NotepadFrame::OnZoomOut, this, wxID_ZOOM_OUT);
+        Bind(wxEVT_MENU, &NotepadFrame::OnZoomReset, this, wxID_ZOOM_100);
         Bind(wxEVT_FIND, &NotepadFrame::OnFindDialogEvent, this);
         Bind(wxEVT_FIND_NEXT, &NotepadFrame::OnFindDialogEvent, this);
         Bind(wxEVT_FIND_REPLACE, &NotepadFrame::OnFindDialogEvent, this);
@@ -186,6 +305,36 @@ public:
         Bind(wxEVT_FIND_CLOSE, &NotepadFrame::OnFindDialogEvent, this);
         Bind(wxEVT_NOTEBOOK_PAGE_CHANGED, &NotepadFrame::OnPageChanged, this);
         Bind(wxEVT_CLOSE_WINDOW, &NotepadFrame::OnCloseWindow, this);
+    }
+
+    // Opens `path` in a new tab, reading its content from disk. Public so
+    // it can be called for files passed on the command line.
+    void OpenFilePath(const wxString &path)
+    {
+        wxString content;
+        wxFile file(path);
+        if (file.IsOpened())
+            file.ReadAll(&content);
+        else
+        {
+            wxMessageBox("Could not open file:\n" + path, "Error", wxOK | wxICON_ERROR, this);
+            return;
+        }
+
+        AddTab(wxFileName(path).GetFullName(), content, path);
+    }
+
+    // Closes tab 0 if it's still the untouched, unsaved "Untitled" tab
+    // created by the constructor — used after opening files from argv so
+    // we don't leave a spare blank tab sitting in front of them.
+    void CloseInitialBlankTabIfUnused()
+    {
+        if (m_notebook->GetPageCount() < 2) return;
+        if (!m_tabData[0].filePath.IsEmpty()) return;
+        if (m_tabData[0].modified) return;
+        if (!PageText(0)->IsEmpty()) return;
+
+        CloseTab(0, false);
     }
 
 private:
@@ -215,13 +364,8 @@ private:
 
     void SetupEditor(wxStyledTextCtrl *stc)
     {
-        stc->SetLexer(wxSTC_LEX_NULL);
-        stc->StyleSetFont(wxSTC_STYLE_DEFAULT,
-            wxFont(10, wxFONTFAMILY_TELETYPE, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL));
-
         // Line number margin
         stc->SetMarginType(0, wxSTC_MARGIN_NUMBER);
-        stc->SetMarginWidth(0, stc->TextWidth(wxSTC_STYLE_LINENUMBER, "_99999"));
         stc->SetMarginWidth(1, 0); // hide folding/symbol margin
 
         stc->SetTabWidth(4);
@@ -245,12 +389,14 @@ private:
 
         wxStyledTextCtrl *stc = new wxStyledTextCtrl(m_notebook, wxID_ANY);
         SetupEditor(stc);
+        ApplyHighlighting(stc, filePath);
         if (!content.IsEmpty())
             stc->SetText(content);
         stc->EmptyUndoBuffer();
 
         stc->Bind(wxEVT_STC_MODIFIED, &NotepadFrame::OnTextModified, this);
         stc->Bind(wxEVT_STC_CHANGE, &NotepadFrame::OnLineCountChange, this);
+        stc->Bind(wxEVT_STC_ZOOM, &NotepadFrame::OnZoomChanged, this);
 
         m_notebook->AddPage(stc, title, true);
         UpdateMarginWidth(stc);
@@ -294,6 +440,13 @@ private:
     }
 
     void OnLineCountChange(wxStyledTextEvent &event)
+    {
+        wxStyledTextCtrl *stc = (wxStyledTextCtrl*)event.GetEventObject();
+        UpdateMarginWidth(stc);
+        event.Skip();
+    }
+
+    void OnZoomChanged(wxStyledTextEvent &event)
     {
         wxStyledTextCtrl *stc = (wxStyledTextCtrl*)event.GetEventObject();
         UpdateMarginWidth(stc);
@@ -353,6 +506,8 @@ private:
                 wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
             if (dlg.ShowModal() == wxID_CANCEL) return false;
             m_tabData[index].filePath = dlg.GetPath();
+            ApplyHighlighting(stc, m_tabData[index].filePath);
+            UpdateMarginWidth(stc);
         }
 
         wxFile file(m_tabData[index].filePath, wxFile::write);
@@ -374,13 +529,7 @@ private:
             wxFD_OPEN | wxFD_FILE_MUST_EXIST);
         if (dlg.ShowModal() == wxID_CANCEL) return;
 
-        wxString path = dlg.GetPath();
-        wxString content;
-        wxFile file(path);
-        if (file.IsOpened())
-            file.ReadAll(&content);
-
-        AddTab(wxFileName(path).GetFullName(), content, path);
+        OpenFilePath(dlg.GetPath());
     }
 
     void OnSave(wxCommandEvent &event)
@@ -556,6 +705,21 @@ private:
             PageText((int)i)->SetWrapMode(mode);
     }
 
+    void OnZoomIn(wxCommandEvent &event)
+    {
+        if (auto *t = CurrentText()) { t->ZoomIn(); UpdateMarginWidth(t); }
+    }
+
+    void OnZoomOut(wxCommandEvent &event)
+    {
+        if (auto *t = CurrentText()) { t->ZoomOut(); UpdateMarginWidth(t); }
+    }
+
+    void OnZoomReset(wxCommandEvent &event)
+    {
+        if (auto *t = CurrentText()) { t->SetZoom(0); UpdateMarginWidth(t); }
+    }
+
     wxString NotFoundMessage(const wxString &text)
     {
         return m_wrapAround
@@ -655,6 +819,16 @@ public:
     bool OnInit() override
     {
         NotepadFrame *frame = new NotepadFrame();
+
+        // Any non-option arguments are treated as files to open.
+        for (int i = 1; i < argc; i++)
+            frame->OpenFilePath(argv[i]);
+
+        // Drop the initial blank "Untitled" tab once real files are open,
+        // as long as it's still untouched.
+        if (argc > 1)
+            frame->CloseInitialBlankTabIfUnused();
+
         frame->Show();
         return true;
     }
