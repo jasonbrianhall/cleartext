@@ -7,7 +7,10 @@
 #include <wx/fdrepdlg.h>
 #include <wx/snglinst.h>
 #include <wx/ipc.h>
+#include <wx/fileconf.h>
+#include <wx/stdpaths.h>
 #include <vector>
+#include "themes.h"
 
 // Simple printout that paginates plain text across pages using the
 // device context's own text-measurement, so it scales to any paper size.
@@ -103,18 +106,69 @@ private:
 };
 
 // ============================================================================
+// PERSISTED SETTINGS (theme + last-session file list)
+// ============================================================================
+
+// A single file-backed config (~/.config/ClearText/cleartext.conf on Linux,
+// %APPDATA%\ClearText\cleartext.conf on Windows) rather than wx's default
+// wxConfig backend, so behavior — and the on-disk format — matches on both
+// platforms instead of Windows silently using the registry.
+static wxString GetConfigFilePath()
+{
+    wxString dir = wxStandardPaths::Get().GetUserConfigDir() +
+        wxFileName::GetPathSeparator() + "ClearText";
+    if (!wxDirExists(dir))
+        wxFileName::Mkdir(dir, wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL);
+    return dir + wxFileName::GetPathSeparator() + "cleartext.conf";
+}
+
+// ============================================================================
 // SYNTAX HIGHLIGHTING (Scintilla built-in lexers, chosen by file extension)
 // ============================================================================
 
+// Index into AllThemes() for the currently active theme, applied to every
+// tab (existing and new). A plain process-wide global rather than a frame
+// member since the lexer helper functions below are free functions shared
+// by every editor instance.
+static int g_themeIndex = 0;
+
+// Base editor font size in points, applied to every tab the same way the
+// theme is. Adjusted via View > Increase/Decrease/Reset Font Size.
+static const int kMinFontSize = 6;
+static const int kMaxFontSize = 36;
+static const int kDefaultFontSize = 10;
+static int g_fontSize = kDefaultFontSize;
+
+static const EditorTheme &CurrentTheme()
+{
+    return AllThemes()[g_themeIndex];
+}
+
 static void SetCommonStyleDefaults(wxStyledTextCtrl *stc)
 {
+    const EditorTheme &th = CurrentTheme();
+
     // Named lvalue: some wx builds (e.g. mingw wx 3.0) declare
     // StyleSetFont(int, wxFont&) as a non-const reference, which can't
     // bind to a temporary.
-    wxFont editorFont(10, wxFONTFAMILY_TELETYPE, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL);
+    wxFont editorFont(g_fontSize, wxFONTFAMILY_TELETYPE, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL);
     stc->StyleSetFont(wxSTC_STYLE_DEFAULT, editorFont);
-    stc->StyleSetForeground(wxSTC_STYLE_DEFAULT, *wxBLACK);
+    stc->StyleSetBackground(wxSTC_STYLE_DEFAULT, th.background);
+    stc->StyleSetForeground(wxSTC_STYLE_DEFAULT, th.foreground);
     stc->StyleClearAll(); // propagates STYLE_DEFAULT (font/color) to every style
+
+    // Scintilla has its own separate, per-tab "zoom" concept (e.g. from
+    // Ctrl+scroll-wheel) layered on top of the base font size. It's never
+    // persisted, so if it's left non-zero here the displayed size silently
+    // drifts from — and stops matching — the saved FontSize preference.
+    stc->SetZoom(0);
+
+    stc->SetCaretForeground(th.caret);
+    stc->SetSelBackground(true, th.selectionBg);
+    stc->StyleSetBackground(wxSTC_STYLE_LINENUMBER, th.marginBg);
+    stc->StyleSetForeground(wxSTC_STYLE_LINENUMBER, th.marginFg);
+    stc->SetWhitespaceBackground(true, th.background);
+    stc->SetWhitespaceForeground(true, th.marginFg);
 }
 
 static void ApplyPlainText(wxStyledTextCtrl *stc)
@@ -125,6 +179,7 @@ static void ApplyPlainText(wxStyledTextCtrl *stc)
 
 static void ApplyCppStyles(wxStyledTextCtrl *stc)
 {
+    const EditorTheme &th = CurrentTheme();
     stc->SetLexer(wxSTC_LEX_CPP);
     SetCommonStyleDefaults(stc);
 
@@ -136,23 +191,24 @@ static void ApplyCppStyles(wxStyledTextCtrl *stc)
         "extern auto volatile unsigned signed short long void int float "
         "double char bool true false import export function var let");
 
-    stc->StyleSetForeground(wxSTC_C_COMMENT, wxColour(0, 128, 0));
-    stc->StyleSetForeground(wxSTC_C_COMMENTLINE, wxColour(0, 128, 0));
-    stc->StyleSetForeground(wxSTC_C_COMMENTDOC, wxColour(0, 128, 0));
-    stc->StyleSetForeground(wxSTC_C_COMMENTLINEDOC, wxColour(0, 128, 0));
-    stc->StyleSetForeground(wxSTC_C_NUMBER, wxColour(200, 90, 0));
-    stc->StyleSetForeground(wxSTC_C_STRING, wxColour(163, 21, 21));
-    stc->StyleSetForeground(wxSTC_C_CHARACTER, wxColour(163, 21, 21));
-    stc->StyleSetForeground(wxSTC_C_STRINGEOL, wxColour(163, 21, 21));
-    stc->StyleSetForeground(wxSTC_C_PREPROCESSOR, wxColour(128, 0, 128));
-    stc->StyleSetForeground(wxSTC_C_WORD, wxColour(0, 0, 200));
+    stc->StyleSetForeground(wxSTC_C_COMMENT, th.comment);
+    stc->StyleSetForeground(wxSTC_C_COMMENTLINE, th.comment);
+    stc->StyleSetForeground(wxSTC_C_COMMENTDOC, th.comment);
+    stc->StyleSetForeground(wxSTC_C_COMMENTLINEDOC, th.comment);
+    stc->StyleSetForeground(wxSTC_C_NUMBER, th.number);
+    stc->StyleSetForeground(wxSTC_C_STRING, th.string);
+    stc->StyleSetForeground(wxSTC_C_CHARACTER, th.string);
+    stc->StyleSetForeground(wxSTC_C_STRINGEOL, th.string);
+    stc->StyleSetForeground(wxSTC_C_PREPROCESSOR, th.preprocessor);
+    stc->StyleSetForeground(wxSTC_C_WORD, th.keyword);
     stc->StyleSetBold(wxSTC_C_WORD, true);
-    stc->StyleSetForeground(wxSTC_C_WORD2, wxColour(0, 100, 100));
-    stc->StyleSetForeground(wxSTC_C_OPERATOR, wxColour(80, 80, 80));
+    stc->StyleSetForeground(wxSTC_C_WORD2, th.keyword2);
+    stc->StyleSetForeground(wxSTC_C_OPERATOR, th.operatorColor);
 }
 
 static void ApplyPythonStyles(wxStyledTextCtrl *stc)
 {
+    const EditorTheme &th = CurrentTheme();
     stc->SetLexer(wxSTC_LEX_PYTHON);
     SetCommonStyleDefaults(stc);
 
@@ -161,38 +217,75 @@ static void ApplyPythonStyles(wxStyledTextCtrl *stc)
         "def del elif else except finally for from global if import in is "
         "lambda nonlocal not or pass raise return try while with yield");
 
-    stc->StyleSetForeground(wxSTC_P_COMMENTLINE, wxColour(0, 128, 0));
-    stc->StyleSetForeground(wxSTC_P_COMMENTBLOCK, wxColour(0, 128, 0));
-    stc->StyleSetForeground(wxSTC_P_NUMBER, wxColour(200, 90, 0));
-    stc->StyleSetForeground(wxSTC_P_STRING, wxColour(163, 21, 21));
-    stc->StyleSetForeground(wxSTC_P_CHARACTER, wxColour(163, 21, 21));
-    stc->StyleSetForeground(wxSTC_P_TRIPLE, wxColour(163, 21, 21));
-    stc->StyleSetForeground(wxSTC_P_TRIPLEDOUBLE, wxColour(163, 21, 21));
-    stc->StyleSetForeground(wxSTC_P_WORD, wxColour(0, 0, 200));
+    stc->StyleSetForeground(wxSTC_P_COMMENTLINE, th.comment);
+    stc->StyleSetForeground(wxSTC_P_COMMENTBLOCK, th.comment);
+    stc->StyleSetForeground(wxSTC_P_NUMBER, th.number);
+    stc->StyleSetForeground(wxSTC_P_STRING, th.string);
+    stc->StyleSetForeground(wxSTC_P_CHARACTER, th.string);
+    stc->StyleSetForeground(wxSTC_P_TRIPLE, th.string);
+    stc->StyleSetForeground(wxSTC_P_TRIPLEDOUBLE, th.string);
+    stc->StyleSetForeground(wxSTC_P_WORD, th.keyword);
     stc->StyleSetBold(wxSTC_P_WORD, true);
-    stc->StyleSetForeground(wxSTC_P_CLASSNAME, wxColour(0, 100, 100));
+    stc->StyleSetForeground(wxSTC_P_CLASSNAME, th.keyword2);
     stc->StyleSetBold(wxSTC_P_CLASSNAME, true);
-    stc->StyleSetForeground(wxSTC_P_DEFNAME, wxColour(0, 100, 100));
+    stc->StyleSetForeground(wxSTC_P_DEFNAME, th.keyword2);
     stc->StyleSetBold(wxSTC_P_DEFNAME, true);
-    stc->StyleSetForeground(wxSTC_P_OPERATOR, wxColour(80, 80, 80));
-    stc->StyleSetForeground(wxSTC_P_DECORATOR, wxColour(128, 0, 128));
+    stc->StyleSetForeground(wxSTC_P_OPERATOR, th.operatorColor);
+    stc->StyleSetForeground(wxSTC_P_DECORATOR, th.preprocessor);
 }
 
 static void ApplyMarkupStyles(wxStyledTextCtrl *stc, bool isXml)
 {
+    const EditorTheme &th = CurrentTheme();
     stc->SetLexer(isXml ? wxSTC_LEX_XML : wxSTC_LEX_HTML);
     SetCommonStyleDefaults(stc);
 
-    stc->StyleSetForeground(wxSTC_H_TAG, wxColour(0, 0, 200));
+    stc->StyleSetForeground(wxSTC_H_TAG, th.tag);
     stc->StyleSetBold(wxSTC_H_TAG, true);
-    stc->StyleSetForeground(wxSTC_H_TAGEND, wxColour(0, 0, 200));
-    stc->StyleSetForeground(wxSTC_H_ATTRIBUTE, wxColour(200, 90, 0));
-    stc->StyleSetForeground(wxSTC_H_ATTRIBUTEUNKNOWN, wxColour(200, 90, 0));
-    stc->StyleSetForeground(wxSTC_H_DOUBLESTRING, wxColour(163, 21, 21));
-    stc->StyleSetForeground(wxSTC_H_SINGLESTRING, wxColour(163, 21, 21));
-    stc->StyleSetForeground(wxSTC_H_COMMENT, wxColour(0, 128, 0));
-    stc->StyleSetForeground(wxSTC_H_ENTITY, wxColour(128, 0, 128));
-    stc->StyleSetForeground(wxSTC_H_NUMBER, wxColour(200, 90, 0));
+    stc->StyleSetForeground(wxSTC_H_TAGEND, th.tag);
+    stc->StyleSetForeground(wxSTC_H_ATTRIBUTE, th.number);
+    stc->StyleSetForeground(wxSTC_H_ATTRIBUTEUNKNOWN, th.number);
+    stc->StyleSetForeground(wxSTC_H_DOUBLESTRING, th.string);
+    stc->StyleSetForeground(wxSTC_H_SINGLESTRING, th.string);
+    stc->StyleSetForeground(wxSTC_H_COMMENT, th.comment);
+    stc->StyleSetForeground(wxSTC_H_ENTITY, th.preprocessor);
+    stc->StyleSetForeground(wxSTC_H_NUMBER, th.number);
+}
+
+static void ApplyMarkdownStyles(wxStyledTextCtrl *stc)
+{
+    const EditorTheme &th = CurrentTheme();
+    stc->SetLexer(wxSTC_LEX_MARKDOWN);
+    SetCommonStyleDefaults(stc);
+
+    // Headers 1-6 all share the same "heading" color; only weight/size vary
+    // a little so bigger headings still read as bigger at a glance.
+    int headerStyles[] = {
+        wxSTC_MARKDOWN_HEADER1, wxSTC_MARKDOWN_HEADER2, wxSTC_MARKDOWN_HEADER3,
+        wxSTC_MARKDOWN_HEADER4, wxSTC_MARKDOWN_HEADER5, wxSTC_MARKDOWN_HEADER6
+    };
+    for (int i = 0; i < 6; i++)
+    {
+        stc->StyleSetForeground(headerStyles[i], th.tag);
+        stc->StyleSetBold(headerStyles[i], true);
+        stc->StyleSetSize(headerStyles[i], 10 + (6 - i)); // H1 largest, H6 smallest
+    }
+
+    stc->StyleSetBold(wxSTC_MARKDOWN_STRONG1, true);
+    stc->StyleSetBold(wxSTC_MARKDOWN_STRONG2, true);
+    stc->StyleSetItalic(wxSTC_MARKDOWN_EM1, true);
+    stc->StyleSetItalic(wxSTC_MARKDOWN_EM2, true);
+    stc->StyleSetForeground(wxSTC_MARKDOWN_STRIKEOUT, th.comment);
+    stc->StyleSetForeground(wxSTC_MARKDOWN_BLOCKQUOTE, th.comment);
+    stc->StyleSetItalic(wxSTC_MARKDOWN_BLOCKQUOTE, true);
+    stc->StyleSetForeground(wxSTC_MARKDOWN_PRECHAR, th.preprocessor);
+    stc->StyleSetForeground(wxSTC_MARKDOWN_ULIST_ITEM, th.preprocessor);
+    stc->StyleSetForeground(wxSTC_MARKDOWN_OLIST_ITEM, th.preprocessor);
+    stc->StyleSetForeground(wxSTC_MARKDOWN_HRULE, th.comment);
+    stc->StyleSetForeground(wxSTC_MARKDOWN_LINK, th.attribute);
+    stc->StyleSetForeground(wxSTC_MARKDOWN_CODE, th.markupCode);
+    stc->StyleSetForeground(wxSTC_MARKDOWN_CODE2, th.markupCode);
+    stc->StyleSetForeground(wxSTC_MARKDOWN_CODEBK, th.markupCode);
 }
 
 // Picks a lexer + color palette based on the file's extension; falls back
@@ -211,6 +304,8 @@ static void ApplyHighlighting(wxStyledTextCtrl *stc, const wxString &filePath)
         ApplyMarkupStyles(stc, false);
     else if (ext == "xml")
         ApplyMarkupStyles(stc, true);
+    else if (ext == "md" || ext == "markdown")
+        ApplyMarkdownStyles(stc);
     else
         ApplyPlainText(stc);
 
@@ -223,7 +318,8 @@ enum
     ID_CloseTab,
     ID_FindNext,
     ID_WrapAround,
-    ID_WordWrap
+    ID_WordWrap,
+    ID_ThemeBase // must stay last: one radio menu id per entry in AllThemes()
 };
 
 class ClearTextFrame : public wxFrame
@@ -267,10 +363,19 @@ public:
         wxMenuItem *wordWrapItem = viewMenu->AppendCheckItem(ID_WordWrap, "Word Wrap");
         wordWrapItem->Check(true);
         viewMenu->AppendSeparator();
-        viewMenu->Append(wxID_ZOOM_IN, "Zoom In\tCtrl+=");
-        viewMenu->Append(wxID_ZOOM_OUT, "Zoom Out\tCtrl+-");
-        viewMenu->Append(wxID_ZOOM_100, "Reset Zoom\tCtrl+0");
+        viewMenu->Append(wxID_ZOOM_IN, "Increase Font Size\tCtrl+=");
+        viewMenu->Append(wxID_ZOOM_OUT, "Decrease Font Size\tCtrl+-");
+        viewMenu->Append(wxID_ZOOM_100, "Reset Font Size\tCtrl+0");
         menuBar->Append(viewMenu, "&View");
+
+        wxMenu *themeMenu = new wxMenu();
+        const std::vector<EditorTheme> &themes = AllThemes();
+        for (size_t i = 0; i < themes.size(); i++)
+        {
+            wxMenuItem *item = themeMenu->AppendRadioItem(ID_ThemeBase + (int)i, themes[i].name);
+            if ((int)i == g_themeIndex) item->Check(true);
+        }
+        menuBar->Append(themeMenu, "&Theme");
 
         wxMenu *helpMenu = new wxMenu();
         helpMenu->Append(wxID_ABOUT, "About ClearText...");
@@ -311,6 +416,8 @@ public:
         Bind(wxEVT_MENU, &ClearTextFrame::OnZoomIn, this, wxID_ZOOM_IN);
         Bind(wxEVT_MENU, &ClearTextFrame::OnZoomOut, this, wxID_ZOOM_OUT);
         Bind(wxEVT_MENU, &ClearTextFrame::OnZoomReset, this, wxID_ZOOM_100);
+        Bind(wxEVT_MENU, &ClearTextFrame::OnSetTheme, this, ID_ThemeBase,
+             ID_ThemeBase + (int)AllThemes().size() - 1);
         Bind(wxEVT_FIND, &ClearTextFrame::OnFindDialogEvent, this);
         Bind(wxEVT_FIND_NEXT, &ClearTextFrame::OnFindDialogEvent, this);
         Bind(wxEVT_FIND_REPLACE, &ClearTextFrame::OnFindDialogEvent, this);
@@ -419,7 +526,7 @@ private:
         stc->Bind(wxEVT_STC_SAVEPOINTLEFT, &ClearTextFrame::OnSavePointLeft, this);
         stc->Bind(wxEVT_STC_SAVEPOINTREACHED, &ClearTextFrame::OnSavePointReached, this);
         stc->Bind(wxEVT_STC_CHANGE, &ClearTextFrame::OnLineCountChange, this);
-        stc->Bind(wxEVT_STC_ZOOM, &ClearTextFrame::OnZoomChanged, this);
+        stc->Bind(wxEVT_MOUSEWHEEL, &ClearTextFrame::OnMouseWheel, this);
 
         m_notebook->AddPage(stc, title, true);
         UpdateMarginWidth(stc);
@@ -485,17 +592,31 @@ private:
         event.Skip();
     }
 
-    void OnZoomChanged(wxStyledTextEvent &event)
-    {
-        wxStyledTextCtrl *stc = (wxStyledTextCtrl*)event.GetEventObject();
-        UpdateMarginWidth(stc);
-        event.Skip();
-    }
-
     void OnPageChanged(wxBookCtrlEvent &event)
     {
         UpdateTitle();
         event.Skip();
+    }
+
+    // Re-applies highlighting (theme + font size + lexer) to every open tab.
+    // Used whenever a whole-window setting changes, so it's a one-shot
+    // change rather than something each tab tracks separately.
+    void ReapplyHighlightingToAllTabs()
+    {
+        for (size_t i = 0; i < m_notebook->GetPageCount(); i++)
+        {
+            wxStyledTextCtrl *stc = PageText((int)i);
+            ApplyHighlighting(stc, m_tabData[i].filePath);
+            UpdateMarginWidth(stc);
+        }
+    }
+
+    void OnSetTheme(wxCommandEvent &event)
+    {
+        int idx = event.GetId() - ID_ThemeBase;
+        if (idx < 0 || idx >= (int)AllThemes().size()) return;
+        g_themeIndex = idx;
+        ReapplyHighlightingToAllTabs();
     }
 
     void OnNewTab(wxCommandEvent &event)
@@ -592,6 +713,14 @@ private:
 
     void OnCloseWindow(wxCloseEvent &event)
     {
+        // Snapshot which files are open *before* closing anything, so a
+        // mid-close cancel (unsaved-changes prompt) doesn't leave us with a
+        // half-updated list to persist.
+        wxArrayString openFiles;
+        for (const TabData &tab : m_tabData)
+            if (!tab.filePath.IsEmpty())
+                openFiles.Add(tab.filePath);
+
         while (m_notebook->GetPageCount() > 0)
         {
             if (!CloseTab(0, false)) // don't re-add "Untitled" while shutting down
@@ -601,6 +730,8 @@ private:
             }
         }
 
+        SaveSession(openFiles);
+
         if (m_findReplaceDialog)
         {
             m_findReplaceDialog->Destroy();
@@ -608,6 +739,24 @@ private:
         }
 
         Destroy();
+    }
+
+    // Persists the active theme and the set of files that were open, so the
+    // next launch (with no files on the command line) can restore them.
+    void SaveSession(const wxArrayString &openFiles)
+    {
+        wxConfigBase *cfg = wxConfigBase::Get(false);
+        if (!cfg) return;
+
+        cfg->Write("Theme", (long)g_themeIndex);
+        cfg->Write("FontSize", (long)g_fontSize);
+
+        cfg->DeleteGroup("LastSession");
+        cfg->Write("LastSession/Count", (long)openFiles.size());
+        for (size_t i = 0; i < openFiles.size(); i++)
+            cfg->Write(wxString::Format("LastSession/File%zu", i), openFiles[i]);
+
+        cfg->Flush();
     }
 
     void OnUndo(wxCommandEvent &event) { if (auto *t = CurrentText()) t->Undo(); }
@@ -745,19 +894,38 @@ private:
             PageText((int)i)->SetWrapMode(mode);
     }
 
-    void OnZoomIn(wxCommandEvent &event)
+    // These resize the actual base font (persisted, whole-window) rather
+    // than using wxStyledTextCtrl's own per-tab visual zoom, so the size a
+    // person picks is what gets saved and restored next launch.
+    void ChangeFontSize(int delta)
     {
-        if (auto *t = CurrentText()) { t->ZoomIn(); UpdateMarginWidth(t); }
+        int newSize = g_fontSize + delta;
+        if (newSize < kMinFontSize || newSize > kMaxFontSize) return;
+        g_fontSize = newSize;
+        ReapplyHighlightingToAllTabs();
     }
 
-    void OnZoomOut(wxCommandEvent &event)
-    {
-        if (auto *t = CurrentText()) { t->ZoomOut(); UpdateMarginWidth(t); }
-    }
+    void OnZoomIn(wxCommandEvent &event) { ChangeFontSize(+1); }
+    void OnZoomOut(wxCommandEvent &event) { ChangeFontSize(-1); }
 
     void OnZoomReset(wxCommandEvent &event)
     {
-        if (auto *t = CurrentText()) { t->SetZoom(0); UpdateMarginWidth(t); }
+        g_fontSize = kDefaultFontSize;
+        ReapplyHighlightingToAllTabs();
+    }
+
+    // Scintilla natively zooms on Ctrl+scroll-wheel, but that's separate
+    // per-tab state we don't persist. Intercept it here and redirect to the
+    // same whole-window, saved font-size change the menu items use, instead
+    // of letting the two zoom systems drift apart.
+    void OnMouseWheel(wxMouseEvent &event)
+    {
+        if (event.ControlDown())
+        {
+            ChangeFontSize(event.GetWheelRotation() > 0 ? +1 : -1);
+            return;
+        }
+        event.Skip();
     }
 
     wxString NotFoundMessage(const wxString &text)
@@ -963,6 +1131,8 @@ public:
             // (e.g. the other instance is stuck/unresponsive).
         }
 
+        LoadConfig(); // sets g_themeIndex + m_lastSessionFiles before any tab is created
+
         ClearTextFrame *frame = new ClearTextFrame();
 
 #ifndef WIN32
@@ -979,6 +1149,11 @@ public:
             m_server = nullptr; // non-fatal: this instance just won't receive hand-offs
         }
 
+        // Files explicitly passed on the command line always win. Only when
+        // there are none do we fall back to whatever was open at last exit.
+        if (filesToOpen.IsEmpty())
+            filesToOpen = m_lastSessionFiles;
+
         for (const wxString &f : filesToOpen)
             frame->OpenFilePath(f);
         if (!filesToOpen.IsEmpty())
@@ -992,12 +1167,43 @@ public:
     {
         delete m_server;
         delete m_instanceChecker;
+        delete wxConfigBase::Set(nullptr); // flush + free the config we installed in OnInit
         return wxApp::OnExit();
     }
 
 private:
     wxSingleInstanceChecker *m_instanceChecker = nullptr;
     ClearTextServer *m_server = nullptr;
+    wxArrayString m_lastSessionFiles;
+
+    // Installs the on-disk config as the process-wide default (so
+    // wxConfigBase::Get() works anywhere, e.g. ClearTextFrame::SaveSession),
+    // then reads back the saved theme and last-session file list.
+    void LoadConfig()
+    {
+        wxConfigBase::Set(new wxFileConfig("ClearText", wxEmptyString,
+            GetConfigFilePath(), wxEmptyString, wxCONFIG_USE_LOCAL_FILE));
+        wxConfigBase *cfg = wxConfigBase::Get();
+
+        long savedTheme = 0;
+        cfg->Read("Theme", &savedTheme, 0L);
+        if (savedTheme >= 0 && savedTheme < (long)AllThemes().size())
+            g_themeIndex = (int)savedTheme;
+
+        long savedFontSize = kDefaultFontSize;
+        cfg->Read("FontSize", &savedFontSize, (long)kDefaultFontSize);
+        if (savedFontSize >= kMinFontSize && savedFontSize <= kMaxFontSize)
+            g_fontSize = (int)savedFontSize;
+
+        long count = 0;
+        cfg->Read("LastSession/Count", &count, 0L);
+        for (long i = 0; i < count; i++)
+        {
+            wxString path;
+            if (cfg->Read(wxString::Format("LastSession/File%ld", i), &path) && !path.IsEmpty())
+                m_lastSessionFiles.Add(path);
+        }
+    }
 };
 
 wxIMPLEMENT_APP(ClearTextApp);
