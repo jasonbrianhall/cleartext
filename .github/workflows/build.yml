@@ -367,7 +367,7 @@ jobs:
 
           <Properties>
             <DisplayName>ClearText</DisplayName>
-            <PublisherDisplayName>ClearText</PublisherDisplayName>
+            <PublisherDisplayName>Jason Brian Hall</PublisherDisplayName>
             <Description>A lightweight, multi-tab text editor.</Description>
             <Logo>Assets\StoreLogo.scale-100.png</Logo>
           </Properties>
