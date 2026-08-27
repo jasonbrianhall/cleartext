@@ -1,0 +1,5 @@
+// Embeds icon.ico into cleartext.exe so the file, its window, and its
+// taskbar entry all show the app icon instead of Windows' generic default.
+// Only used for the Windows build (compiled with windres); icon.ico must
+// exist alongside this file at build time.
+appicon ICON "icon.ico"

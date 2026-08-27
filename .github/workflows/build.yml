@@ -46,21 +46,20 @@ jobs:
           zip unzip \
           ImageMagick
 
-    - name: Build Windows Executable
-      run: |
-        make windows
-
     - name: Convert PNG Icon to ICO Format
-      working-directory: build/windows
       run: |
-        if [ -f "../../icon.png" ]; then
+        if [ -f "icon.png" ]; then
           echo "Converting icon.png to icon.ico..."
-          convert ../../icon.png -resize 256x256 -colors 256 icon.ico
+          convert icon.png -resize 256x256 -colors 256 icon.ico
           echo "✅ Icon converted successfully"
           ls -lh icon.ico
         else
-          echo "⚠️  icon.png not found at repo root"
+          echo "⚠️  icon.png not found at repo root — exe will use the default icon"
         fi
+
+    - name: Build Windows Executable
+      run: |
+        make windows
 
     - name: Prepare Build Artifacts
       working-directory: build/windows
@@ -68,6 +67,7 @@ jobs:
         cp ../../README.md . 2>/dev/null || true
         cp ../../LICENSE.md . 2>/dev/null || true
         cp ../../icon.png . 2>/dev/null || true
+        cp ../../icon.ico . 2>/dev/null || true
 
         if [ ! -f "cleartext.exe" ]; then
           echo "❌ ERROR: cleartext.exe not found!"

@@ -50,6 +50,9 @@ WX_LIBS_WIN   := -L/usr/x86_64-w64-mingw32/sys-root/mingw/lib \
                   -lwinmm -lshell32 -lshlwapi -lcomdlg32 -ladvapi32 \
                   -lversion -lwsock32 -lgdi32
 
+WINDRES = x86_64-w64-mingw32-windres
+ICON_RES := $(if $(wildcard icon.ico),$(BUILD_DIR_WIN)/cleartext_res.o,)
+
 CXXFLAGS_WIN = $(CXXFLAGS_COMMON) -DWIN32 -D_WIN32 -D_WIN32_WINNT=0x0A00 \
                $(WX_CFLAGS_WIN) -O2
 
@@ -66,9 +69,10 @@ $(EXECUTABLE_LINUX): $(SRC)
 	$(CXX_LINUX) $(CXXFLAGS_LINUX) $(SRC) -o $(EXECUTABLE_LINUX) $(LDFLAGS_LINUX)
 	@echo "Built $(EXECUTABLE_LINUX)"
 
-# Cross-compiles, then automatically collects the mingw runtime/wx DLLs
-# alongside the .exe via collect_dlls.sh, same pattern as Felix Terminal's
-# frontend-windows-dlls target.
+# Cross-compiles (embedding icon.ico as the exe/window icon if present),
+# then automatically collects the mingw runtime/wx DLLs alongside the .exe
+# via collect_dlls.sh, same pattern as Felix Terminal's frontend-windows-dlls
+# target.
 windows: $(EXECUTABLE_WIN)
 	@if [ -f collect_dlls.sh ]; then \
 		echo "Collecting Windows DLLs for ClearText..."; \
@@ -81,10 +85,14 @@ windows: $(EXECUTABLE_WIN)
 		echo "  libwx_baseu-3.0-x86_64-w64-mingw32.dll, libwinpthread-1.dll"; \
 	fi
 
-$(EXECUTABLE_WIN): $(SRC)
+$(EXECUTABLE_WIN): $(SRC) $(ICON_RES)
 	@mkdir -p $(BUILD_DIR_WIN)
-	$(CXX_WIN) $(CXXFLAGS_WIN) $(SRC) -o $(EXECUTABLE_WIN) $(LDFLAGS_WIN)
+	$(CXX_WIN) $(CXXFLAGS_WIN) $(SRC) $(ICON_RES) -o $(EXECUTABLE_WIN) $(LDFLAGS_WIN)
 	@echo "Built $(EXECUTABLE_WIN)"
+
+$(BUILD_DIR_WIN)/cleartext_res.o: cleartext.rc icon.ico
+	@mkdir -p $(BUILD_DIR_WIN)
+	$(WINDRES) cleartext.rc -O coff -o $@
 
 debug: $(EXECUTABLE_LINUX_DEBUG)
 
@@ -106,3 +114,6 @@ help:
 	@echo "  x86_64-w64-mingw32-g++ (mingw-w64)"
 	@echo "  A mingw64 wxWidgets build (Fedora: sudo dnf install mingw64-wxWidgets)"
 	@echo "  Adjust WX_CFLAGS_WIN/WX_LIBS_WIN above if your wx version/paths differ."
+	@echo ""
+	@echo "If icon.ico exists in the project root at build time, it's embedded"
+	@echo "into cleartext.exe (via cleartext.rc + windres) as the exe/window icon."

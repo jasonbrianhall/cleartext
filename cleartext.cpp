@@ -1,5 +1,3 @@
-// Created by Jason Hall
-
 #include <wx/wx.h>
 #include <wx/notebook.h>
 #include <wx/filename.h>
@@ -280,6 +278,13 @@ public:
 
         SetMenuBar(menuBar);
         CreateStatusBar();
+
+#ifdef WIN32
+        // Loads the icon embedded via cleartext.rc/windres. Safe no-op if
+        // the exe wasn't built with the resource (e.g. a dev build without
+        // icon.ico present) — SetIcon with an invalid wxIcon just does nothing.
+        SetIcon(wxIcon("appicon"));
+#endif
 
         m_notebook = new wxNotebook(this, wxID_ANY);
         AddTab("Untitled");
