@@ -4,6 +4,7 @@
 #include <wx/stc/stc.h>
 #include <wx/print.h>
 #include <wx/aboutdlg.h>
+#include <wx/fdrepdlg.h>
 
 // Simple printout that paginates plain text across pages using the
 // device context's own text-measurement, so it scales to any paper size.
@@ -16,13 +17,36 @@ public:
         m_lines = wxSplit(m_text, '\n');
     }
 
+    void OnPreparePrinting() override
+    {
+        wxDC *dc = GetDC();
+        if (!dc) return;
+
+        // Printer DCs run at a much higher DPI than the screen, so without
+        // scaling, point sizes come out tiny relative to the page. Scale so
+        // that our font size maps to its true physical size on paper.
+        wxSize ppiPrinter, ppiScreen;
+        GetPPIPrinter(&ppiPrinter.x, &ppiPrinter.y);
+        GetPPIScreen(&ppiScreen.x, &ppiScreen.y);
+        if (ppiScreen.x == 0) ppiScreen = wxSize(96, 96);
+        float scale = (float)ppiPrinter.x / (float)ppiScreen.x;
+
+        int pageW, pageH;
+        GetPageSizePixels(&pageW, &pageH);
+        wxSize dcSize = dc->GetSize();
+        float pageScale = pageW > 0 ? (float)dcSize.x / (float)pageW : 1.0f;
+
+        m_scale = scale * pageScale;
+        dc->SetUserScale(m_scale, m_scale);
+    }
+
     bool OnPrintPage(int page) override
     {
         wxDC *dc = GetDC();
         if (!dc) return false;
 
-        dc->SetFont(wxFont(10, wxFONTFAMILY_TELETYPE, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL));
-        int lineHeight = dc->GetCharHeight() + 2;
+        dc->SetFont(wxFont(m_fontPointSize, wxFONTFAMILY_TELETYPE, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL));
+        int lineHeight = dc->GetCharHeight() + 4;
 
         int firstLine = (page - 1) * m_linesPerPage;
         int lastLine = wxMin(firstLine + m_linesPerPage, (int)m_lines.size());
@@ -45,12 +69,15 @@ public:
             return;
         }
 
-        int w = 0, h = 0;
-        dc->GetSize(&w, &h);
-        dc->SetFont(wxFont(10, wxFONTFAMILY_TELETYPE, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL));
-        int lineHeight = dc->GetCharHeight() + 2;
+        // Usable page height in the DC's *scaled* (logical) units.
+        int pageW, pageH;
+        GetPageSizePixels(&pageW, &pageH);
+        int usableH = m_scale > 0 ? (int)(pageH / m_scale) : pageH;
+
+        dc->SetFont(wxFont(m_fontPointSize, wxFONTFAMILY_TELETYPE, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL));
+        int lineHeight = dc->GetCharHeight() + 4;
         if (lineHeight <= 0) lineHeight = 1;
-        m_linesPerPage = wxMax(1, h / lineHeight);
+        m_linesPerPage = wxMax(1, usableH / lineHeight);
 
         int pages = wxMax(1, (int)((m_lines.size() + m_linesPerPage - 1) / m_linesPerPage));
         *minPage = 1;
@@ -68,12 +95,17 @@ private:
     wxString m_text;
     wxArrayString m_lines;
     int m_linesPerPage = 1;
+    int m_fontPointSize = 14;
+    float m_scale = 1.0f;
 };
 
 enum
 {
     ID_NewTab = wxID_HIGHEST + 1,
-    ID_CloseTab
+    ID_CloseTab,
+    ID_FindNext,
+    ID_WrapAround,
+    ID_WordWrap
 };
 
 class NotepadFrame : public wxFrame
@@ -105,7 +137,18 @@ public:
         editMenu->Append(wxID_PASTE, "Paste\tCtrl+V");
         editMenu->AppendSeparator();
         editMenu->Append(wxID_SELECTALL, "Select All\tCtrl+A");
+        editMenu->AppendSeparator();
+        editMenu->Append(wxID_FIND, "Find...\tCtrl+F");
+        editMenu->Append(ID_FindNext, "Find Next\tF3");
+        editMenu->Append(wxID_REPLACE, "Replace...\tCtrl+H");
+        wxMenuItem *wrapItem = editMenu->AppendCheckItem(ID_WrapAround, "Wrap Around");
+        wrapItem->Check(true);
         menuBar->Append(editMenu, "&Edit");
+
+        wxMenu *viewMenu = new wxMenu();
+        wxMenuItem *wordWrapItem = viewMenu->AppendCheckItem(ID_WordWrap, "Word Wrap");
+        wordWrapItem->Check(true);
+        menuBar->Append(viewMenu, "&View");
 
         wxMenu *helpMenu = new wxMenu();
         helpMenu->Append(wxID_ABOUT, "About Notepad...");
@@ -131,6 +174,16 @@ public:
         Bind(wxEVT_MENU, &NotepadFrame::OnSelectAll, this, wxID_SELECTALL);
         Bind(wxEVT_MENU, &NotepadFrame::OnPrint, this, wxID_PRINT);
         Bind(wxEVT_MENU, &NotepadFrame::OnAbout, this, wxID_ABOUT);
+        Bind(wxEVT_MENU, &NotepadFrame::OnFindMenu, this, wxID_FIND);
+        Bind(wxEVT_MENU, &NotepadFrame::OnReplaceMenu, this, wxID_REPLACE);
+        Bind(wxEVT_MENU, &NotepadFrame::OnFindNext, this, ID_FindNext);
+        Bind(wxEVT_MENU, &NotepadFrame::OnToggleWrapAround, this, ID_WrapAround);
+        Bind(wxEVT_MENU, &NotepadFrame::OnToggleWordWrap, this, ID_WordWrap);
+        Bind(wxEVT_FIND, &NotepadFrame::OnFindDialogEvent, this);
+        Bind(wxEVT_FIND_NEXT, &NotepadFrame::OnFindDialogEvent, this);
+        Bind(wxEVT_FIND_REPLACE, &NotepadFrame::OnFindDialogEvent, this);
+        Bind(wxEVT_FIND_REPLACE_ALL, &NotepadFrame::OnFindDialogEvent, this);
+        Bind(wxEVT_FIND_CLOSE, &NotepadFrame::OnFindDialogEvent, this);
         Bind(wxEVT_NOTEBOOK_PAGE_CHANGED, &NotepadFrame::OnPageChanged, this);
         Bind(wxEVT_CLOSE_WINDOW, &NotepadFrame::OnCloseWindow, this);
     }
@@ -144,6 +197,9 @@ private:
 
     wxNotebook *m_notebook;
     std::vector<TabData> m_tabData;
+    wxFindReplaceData m_findData{wxFR_DOWN};
+    wxFindReplaceDialog *m_findReplaceDialog = nullptr;
+    bool m_wrapAround = true;
 
     wxStyledTextCtrl* CurrentText()
     {
@@ -170,7 +226,7 @@ private:
 
         stc->SetTabWidth(4);
         stc->SetUseTabs(false);
-        stc->SetWrapMode(wxSTC_WRAP_NONE);
+        stc->SetWrapMode(wxSTC_WRAP_WORD);
     }
 
     // Grows the line-number margin as the document gains more digits
@@ -355,6 +411,13 @@ private:
                 return;
             }
         }
+
+        if (m_findReplaceDialog)
+        {
+            m_findReplaceDialog->Destroy();
+            m_findReplaceDialog = nullptr;
+        }
+
         Destroy();
     }
 
@@ -394,24 +457,195 @@ private:
         info.SetDescription("A simple multi-tab text editor built with wxWidgets.");
         info.SetCopyright("(C) 2026");
         info.SetLicense(
-            "MIT License\n\n"
-            "Permission is hereby granted, free of charge, to any person obtaining a copy "
-            "of this software and associated documentation files (the \"Software\"), to deal "
-            "in the Software without restriction, including without limitation the rights "
-            "to use, copy, modify, merge, publish, distribute, sublicense, and/or sell "
-            "copies of the Software, and to permit persons to whom the Software is "
-            "furnished to do so, subject to the following conditions:\n\n"
-            "The above copyright notice and this permission notice shall be included in all "
-            "copies or substantial portions of the Software.\n\n"
-            "THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR "
-            "IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, "
-            "FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE "
-            "AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER "
-            "LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, "
-            "OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE "
-            "SOFTWARE."
+            "MIT License\n"
+            "\n"
+            "Permission is hereby granted, free of charge, to any person\n"
+            "obtaining a copy of this software and associated documentation\n"
+            "files (the \"Software\"), to deal in the Software without\n"
+            "restriction, including without limitation the rights to use,\n"
+            "copy, modify, merge, publish, distribute, sublicense, and/or\n"
+            "sell copies of the Software, and to permit persons to whom the\n"
+            "Software is furnished to do so, subject to the following\n"
+            "conditions:\n"
+            "\n"
+            "The above copyright notice and this permission notice shall be\n"
+            "included in all copies or substantial portions of the Software.\n"
+            "\n"
+            "THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY\n"
+            "KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE\n"
+            "WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE\n"
+            "AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT\n"
+            "HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,\n"
+            "WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING\n"
+            "FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR\n"
+            "OTHER DEALINGS IN THE SOFTWARE."
         );
         wxAboutBox(info, this);
+    }
+
+    // Searches for `text` starting from the current selection, wrapping
+    // around the document if not found before the end (or start).
+    bool FindInEditor(wxStyledTextCtrl *stc, const wxString &text, int flags, bool forward)
+    {
+        if (!stc || text.IsEmpty()) return false;
+
+        int searchFlags = 0;
+        if (flags & wxFR_MATCHCASE) searchFlags |= wxSTC_FIND_MATCHCASE;
+        if (flags & wxFR_WHOLEWORD) searchFlags |= wxSTC_FIND_WHOLEWORD;
+        stc->SetSearchFlags(searchFlags);
+
+        int docLen = stc->GetTextLength();
+        int foundPos;
+
+        if (forward)
+        {
+            int startPos = stc->GetSelectionEnd();
+            stc->SetTargetStart(startPos);
+            stc->SetTargetEnd(docLen);
+            foundPos = stc->SearchInTarget(text);
+            if (foundPos == -1 && m_wrapAround) // wrap to the top
+            {
+                stc->SetTargetStart(0);
+                stc->SetTargetEnd(docLen);
+                foundPos = stc->SearchInTarget(text);
+            }
+        }
+        else
+        {
+            int startPos = stc->GetSelectionStart();
+            stc->SetTargetStart(startPos);
+            stc->SetTargetEnd(0);
+            foundPos = stc->SearchInTarget(text);
+            if (foundPos == -1 && m_wrapAround) // wrap to the bottom
+            {
+                stc->SetTargetStart(docLen);
+                stc->SetTargetEnd(0);
+                foundPos = stc->SearchInTarget(text);
+            }
+        }
+
+        if (foundPos == -1) return false;
+
+        stc->SetSelection(foundPos, stc->GetTargetEnd());
+        stc->EnsureCaretVisible();
+        return true;
+    }
+
+    void ShowFindDialog(bool replace)
+    {
+        if (m_findReplaceDialog)
+        {
+            m_findReplaceDialog->Destroy();
+            m_findReplaceDialog = nullptr;
+        }
+
+        int style = replace ? wxFR_REPLACEDIALOG : 0;
+        m_findReplaceDialog = new wxFindReplaceDialog(
+            this, &m_findData, replace ? "Replace" : "Find", style);
+        m_findReplaceDialog->Show(true);
+    }
+
+    void OnFindMenu(wxCommandEvent &event) { ShowFindDialog(false); }
+    void OnReplaceMenu(wxCommandEvent &event) { ShowFindDialog(true); }
+    void OnToggleWrapAround(wxCommandEvent &event) { m_wrapAround = event.IsChecked(); }
+
+    void OnToggleWordWrap(wxCommandEvent &event)
+    {
+        int mode = event.IsChecked() ? wxSTC_WRAP_WORD : wxSTC_WRAP_NONE;
+        for (size_t i = 0; i < m_notebook->GetPageCount(); i++)
+            PageText((int)i)->SetWrapMode(mode);
+    }
+
+    wxString NotFoundMessage(const wxString &text)
+    {
+        return m_wrapAround
+            ? "\"" + text + "\" not found."
+            : "\"" + text + "\" not found (wrap around is off).";
+    }
+
+    void OnFindNext(wxCommandEvent &event)
+    {
+        wxStyledTextCtrl *stc = CurrentText();
+        wxString text = m_findData.GetFindString();
+        if (!stc || text.IsEmpty())
+        {
+            ShowFindDialog(false);
+            return;
+        }
+        bool forward = (m_findData.GetFlags() & wxFR_DOWN) != 0;
+        if (!FindInEditor(stc, text, m_findData.GetFlags(), forward))
+            wxMessageBox(NotFoundMessage(text), "Find", wxOK | wxICON_INFORMATION, this);
+    }
+
+    void OnFindDialogEvent(wxFindDialogEvent &event)
+    {
+        wxEventType type = event.GetEventType();
+
+        if (type == wxEVT_FIND_CLOSE)
+        {
+            wxFindReplaceDialog *dlg = event.GetDialog();
+            if (dlg) dlg->Destroy();
+            if (dlg == m_findReplaceDialog) m_findReplaceDialog = nullptr;
+            return;
+        }
+
+        wxStyledTextCtrl *stc = CurrentText();
+        if (!stc) return;
+
+        wxString findText = event.GetFindString();
+        int flags = event.GetFlags();
+        bool forward = (flags & wxFR_DOWN) != 0;
+
+        if (type == wxEVT_FIND || type == wxEVT_FIND_NEXT)
+        {
+            if (!FindInEditor(stc, findText, flags, forward))
+                wxMessageBox(NotFoundMessage(findText), "Find", wxOK | wxICON_INFORMATION, this);
+        }
+        else if (type == wxEVT_FIND_REPLACE)
+        {
+            wxString replaceText = event.GetReplaceString();
+            wxString sel = stc->GetSelectedText();
+            bool matchCase = (flags & wxFR_MATCHCASE) != 0;
+            bool selMatches = matchCase ? (sel == findText) : (sel.CmpNoCase(findText) == 0);
+
+            if (selMatches && !sel.IsEmpty())
+                stc->ReplaceSelection(replaceText);
+
+            FindInEditor(stc, findText, flags, forward);
+        }
+        else if (type == wxEVT_FIND_REPLACE_ALL)
+        {
+            if (findText.IsEmpty()) return;
+
+            wxString replaceText = event.GetReplaceString();
+            int searchFlags = 0;
+            if (flags & wxFR_MATCHCASE) searchFlags |= wxSTC_FIND_MATCHCASE;
+            if (flags & wxFR_WHOLEWORD) searchFlags |= wxSTC_FIND_WHOLEWORD;
+            stc->SetSearchFlags(searchFlags);
+
+            stc->BeginUndoAction();
+            int count = 0;
+            int searchFrom = 0;
+            int docLen = stc->GetTextLength();
+            while (true)
+            {
+                stc->SetTargetStart(searchFrom);
+                stc->SetTargetEnd(docLen);
+                int foundPos = stc->SearchInTarget(findText);
+                if (foundPos == -1) break;
+
+                stc->ReplaceTarget(replaceText);
+                count++;
+
+                int consumed = foundPos + (int)replaceText.length();
+                searchFrom = consumed;
+                docLen = stc->GetTextLength();
+            }
+            stc->EndUndoAction();
+
+            wxMessageBox(wxString::Format("Replaced %d occurrence(s).", count),
+                "Replace All", wxOK | wxICON_INFORMATION, this);
+        }
     }
 };
 
