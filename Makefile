@@ -1,12 +1,12 @@
-# Native Linux build with:    make        (output: build/linux/notepad)
-# Windows cross-compile with: make windows (output: build/windows/notepad.exe)
-# Debug (ASan/UBSan) build with: make debug (output: build/linux_debug/notepad_debug)
+# Native Linux build with:    make        (output: build/linux/cleartext)
+# Windows cross-compile with: make windows (output: build/windows/cleartext.exe)
+# Debug (ASan/UBSan) build with: make debug (output: build/linux_debug/cleartext_debug)
 
 CXX_LINUX = g++
 CXX_WIN   = x86_64-w64-mingw32-g++
 
-TARGET     = notepad
-SRC        = notepad.cpp
+TARGET     = cleartext
+SRC        = cleartext.cpp
 
 BUILD_DIR_LINUX       = build/linux
 BUILD_DIR_LINUX_DEBUG = build/linux_debug
@@ -71,7 +71,7 @@ $(EXECUTABLE_LINUX): $(SRC)
 # frontend-windows-dlls target.
 windows: $(EXECUTABLE_WIN)
 	@if [ -f collect_dlls.sh ]; then \
-		echo "Collecting Windows DLLs for notepad..."; \
+		echo "Collecting Windows DLLs for ClearText..."; \
 		./collect_dlls.sh $(EXECUTABLE_WIN) /usr/x86_64-w64-mingw32/sys-root/mingw/bin $(BUILD_DIR_WIN); \
 		echo "✓ DLLs collected to $(BUILD_DIR_WIN)"; \
 	else \
@@ -97,9 +97,9 @@ clean:
 	rm -rf build
 
 help:
-	@echo "make               - native Linux build (build/linux/notepad)"
+	@echo "make               - native Linux build (build/linux/cleartext)"
 	@echo "make windows       - mingw-w64 cross-compile + auto DLL collection (build/windows/)"
-	@echo "make debug         - ASan/UBSan debug build (build/linux_debug/notepad_debug)"
+	@echo "make debug         - ASan/UBSan debug build (build/linux_debug/cleartext_debug)"
 	@echo "make clean         - remove the build/ directory"
 	@echo ""
 	@echo "Windows cross-compile requires:"

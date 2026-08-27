@@ -226,10 +226,10 @@ enum
     ID_WordWrap
 };
 
-class NotepadFrame : public wxFrame
+class ClearTextFrame : public wxFrame
 {
 public:
-    NotepadFrame() : wxFrame(nullptr, wxID_ANY, "Notepad", wxDefaultPosition, wxSize(800, 600))
+    ClearTextFrame() : wxFrame(nullptr, wxID_ANY, "ClearText", wxDefaultPosition, wxSize(800, 600))
     {
         wxMenuBar *menuBar = new wxMenuBar();
 
@@ -273,7 +273,7 @@ public:
         menuBar->Append(viewMenu, "&View");
 
         wxMenu *helpMenu = new wxMenu();
-        helpMenu->Append(wxID_ABOUT, "About Notepad...");
+        helpMenu->Append(wxID_ABOUT, "About ClearText...");
         menuBar->Append(helpMenu, "&Help");
 
         SetMenuBar(menuBar);
@@ -282,35 +282,35 @@ public:
         m_notebook = new wxNotebook(this, wxID_ANY);
         AddTab("Untitled");
 
-        Bind(wxEVT_MENU, &NotepadFrame::OnNewTab, this, ID_NewTab);
-        Bind(wxEVT_MENU, &NotepadFrame::OnCloseTab, this, ID_CloseTab);
-        Bind(wxEVT_MENU, &NotepadFrame::OnOpen, this, wxID_OPEN);
-        Bind(wxEVT_MENU, &NotepadFrame::OnSave, this, wxID_SAVE);
-        Bind(wxEVT_MENU, &NotepadFrame::OnSaveAs, this, wxID_SAVEAS);
-        Bind(wxEVT_MENU, &NotepadFrame::OnExit, this, wxID_EXIT);
-        Bind(wxEVT_MENU, &NotepadFrame::OnUndo, this, wxID_UNDO);
-        Bind(wxEVT_MENU, &NotepadFrame::OnRedo, this, wxID_REDO);
-        Bind(wxEVT_MENU, &NotepadFrame::OnCut, this, wxID_CUT);
-        Bind(wxEVT_MENU, &NotepadFrame::OnCopy, this, wxID_COPY);
-        Bind(wxEVT_MENU, &NotepadFrame::OnPaste, this, wxID_PASTE);
-        Bind(wxEVT_MENU, &NotepadFrame::OnSelectAll, this, wxID_SELECTALL);
-        Bind(wxEVT_MENU, &NotepadFrame::OnPrint, this, wxID_PRINT);
-        Bind(wxEVT_MENU, &NotepadFrame::OnAbout, this, wxID_ABOUT);
-        Bind(wxEVT_MENU, &NotepadFrame::OnFindMenu, this, wxID_FIND);
-        Bind(wxEVT_MENU, &NotepadFrame::OnReplaceMenu, this, wxID_REPLACE);
-        Bind(wxEVT_MENU, &NotepadFrame::OnFindNext, this, ID_FindNext);
-        Bind(wxEVT_MENU, &NotepadFrame::OnToggleWrapAround, this, ID_WrapAround);
-        Bind(wxEVT_MENU, &NotepadFrame::OnToggleWordWrap, this, ID_WordWrap);
-        Bind(wxEVT_MENU, &NotepadFrame::OnZoomIn, this, wxID_ZOOM_IN);
-        Bind(wxEVT_MENU, &NotepadFrame::OnZoomOut, this, wxID_ZOOM_OUT);
-        Bind(wxEVT_MENU, &NotepadFrame::OnZoomReset, this, wxID_ZOOM_100);
-        Bind(wxEVT_FIND, &NotepadFrame::OnFindDialogEvent, this);
-        Bind(wxEVT_FIND_NEXT, &NotepadFrame::OnFindDialogEvent, this);
-        Bind(wxEVT_FIND_REPLACE, &NotepadFrame::OnFindDialogEvent, this);
-        Bind(wxEVT_FIND_REPLACE_ALL, &NotepadFrame::OnFindDialogEvent, this);
-        Bind(wxEVT_FIND_CLOSE, &NotepadFrame::OnFindDialogEvent, this);
-        Bind(wxEVT_NOTEBOOK_PAGE_CHANGED, &NotepadFrame::OnPageChanged, this);
-        Bind(wxEVT_CLOSE_WINDOW, &NotepadFrame::OnCloseWindow, this);
+        Bind(wxEVT_MENU, &ClearTextFrame::OnNewTab, this, ID_NewTab);
+        Bind(wxEVT_MENU, &ClearTextFrame::OnCloseTab, this, ID_CloseTab);
+        Bind(wxEVT_MENU, &ClearTextFrame::OnOpen, this, wxID_OPEN);
+        Bind(wxEVT_MENU, &ClearTextFrame::OnSave, this, wxID_SAVE);
+        Bind(wxEVT_MENU, &ClearTextFrame::OnSaveAs, this, wxID_SAVEAS);
+        Bind(wxEVT_MENU, &ClearTextFrame::OnExit, this, wxID_EXIT);
+        Bind(wxEVT_MENU, &ClearTextFrame::OnUndo, this, wxID_UNDO);
+        Bind(wxEVT_MENU, &ClearTextFrame::OnRedo, this, wxID_REDO);
+        Bind(wxEVT_MENU, &ClearTextFrame::OnCut, this, wxID_CUT);
+        Bind(wxEVT_MENU, &ClearTextFrame::OnCopy, this, wxID_COPY);
+        Bind(wxEVT_MENU, &ClearTextFrame::OnPaste, this, wxID_PASTE);
+        Bind(wxEVT_MENU, &ClearTextFrame::OnSelectAll, this, wxID_SELECTALL);
+        Bind(wxEVT_MENU, &ClearTextFrame::OnPrint, this, wxID_PRINT);
+        Bind(wxEVT_MENU, &ClearTextFrame::OnAbout, this, wxID_ABOUT);
+        Bind(wxEVT_MENU, &ClearTextFrame::OnFindMenu, this, wxID_FIND);
+        Bind(wxEVT_MENU, &ClearTextFrame::OnReplaceMenu, this, wxID_REPLACE);
+        Bind(wxEVT_MENU, &ClearTextFrame::OnFindNext, this, ID_FindNext);
+        Bind(wxEVT_MENU, &ClearTextFrame::OnToggleWrapAround, this, ID_WrapAround);
+        Bind(wxEVT_MENU, &ClearTextFrame::OnToggleWordWrap, this, ID_WordWrap);
+        Bind(wxEVT_MENU, &ClearTextFrame::OnZoomIn, this, wxID_ZOOM_IN);
+        Bind(wxEVT_MENU, &ClearTextFrame::OnZoomOut, this, wxID_ZOOM_OUT);
+        Bind(wxEVT_MENU, &ClearTextFrame::OnZoomReset, this, wxID_ZOOM_100);
+        Bind(wxEVT_FIND, &ClearTextFrame::OnFindDialogEvent, this);
+        Bind(wxEVT_FIND_NEXT, &ClearTextFrame::OnFindDialogEvent, this);
+        Bind(wxEVT_FIND_REPLACE, &ClearTextFrame::OnFindDialogEvent, this);
+        Bind(wxEVT_FIND_REPLACE_ALL, &ClearTextFrame::OnFindDialogEvent, this);
+        Bind(wxEVT_FIND_CLOSE, &ClearTextFrame::OnFindDialogEvent, this);
+        Bind(wxEVT_NOTEBOOK_PAGE_CHANGED, &ClearTextFrame::OnPageChanged, this);
+        Bind(wxEVT_CLOSE_WINDOW, &ClearTextFrame::OnCloseWindow, this);
     }
 
     // Opens `path` in a new tab, reading its content from disk. Public so
@@ -409,10 +409,10 @@ private:
         stc->EmptyUndoBuffer();
         stc->SetSavePoint(); // mark this freshly-loaded content as "unmodified"
 
-        stc->Bind(wxEVT_STC_SAVEPOINTLEFT, &NotepadFrame::OnSavePointLeft, this);
-        stc->Bind(wxEVT_STC_SAVEPOINTREACHED, &NotepadFrame::OnSavePointReached, this);
-        stc->Bind(wxEVT_STC_CHANGE, &NotepadFrame::OnLineCountChange, this);
-        stc->Bind(wxEVT_STC_ZOOM, &NotepadFrame::OnZoomChanged, this);
+        stc->Bind(wxEVT_STC_SAVEPOINTLEFT, &ClearTextFrame::OnSavePointLeft, this);
+        stc->Bind(wxEVT_STC_SAVEPOINTREACHED, &ClearTextFrame::OnSavePointReached, this);
+        stc->Bind(wxEVT_STC_CHANGE, &ClearTextFrame::OnLineCountChange, this);
+        stc->Bind(wxEVT_STC_ZOOM, &ClearTextFrame::OnZoomChanged, this);
 
         m_notebook->AddPage(stc, title, true);
         UpdateMarginWidth(stc);
@@ -430,10 +430,10 @@ private:
     void UpdateTitle()
     {
         int sel = m_notebook->GetSelection();
-        if (sel == wxNOT_FOUND || sel >= (int)m_tabData.size()) { SetTitle("Notepad"); return; }
+        if (sel == wxNOT_FOUND || sel >= (int)m_tabData.size()) { SetTitle("ClearText"); return; }
         wxString name = m_tabData[sel].filePath.IsEmpty()
             ? "Untitled" : wxFileName(m_tabData[sel].filePath).GetFullName();
-        SetTitle(name + " - Notepad");
+        SetTitle(name + " - ClearText");
     }
 
     int IndexOf(wxStyledTextCtrl *stc)
@@ -634,7 +634,7 @@ private:
     void OnAbout(wxCommandEvent &event)
     {
         wxAboutDialogInfo info;
-        info.SetName("Notepad");
+        info.SetName("ClearText");
         info.SetVersion("1.0");
         info.SetDescription("A simple multi-tab text editor built with wxWidgets.");
         info.SetCopyright("(C) 2026");
@@ -848,7 +848,7 @@ private:
 
 // ============================================================================
 // SINGLE-INSTANCE / IPC
-// A second launch of notepad hands its file arguments to the already-running
+// A second launch of ClearText hands its file arguments to the already-running
 // instance (as new tabs) instead of opening a second window.
 // ============================================================================
 
@@ -860,14 +860,14 @@ private:
 static const wxString IPC_SERVICE = "47230";
 #else
 static const wxString IPC_SERVICE =
-    wxString::Format("/tmp/notepad-ipc-%s", wxGetUserId());
+    wxString::Format("/tmp/cleartext-ipc-%s", wxGetUserId());
 #endif
-static const wxString IPC_TOPIC = "notepad";
+static const wxString IPC_TOPIC = "cleartext";
 
-class NotepadConnection : public wxConnection
+class ClearTextConnection : public wxConnection
 {
 public:
-    explicit NotepadConnection(NotepadFrame *frame) : m_frame(frame) {}
+    explicit ClearTextConnection(ClearTextFrame *frame) : m_frame(frame) {}
 
     bool OnExec(const wxString &topic, const wxString &data) override
     {
@@ -886,22 +886,22 @@ public:
     }
 
 private:
-    NotepadFrame *m_frame;
+    ClearTextFrame *m_frame;
 };
 
-class NotepadServer : public wxServer
+class ClearTextServer : public wxServer
 {
 public:
-    explicit NotepadServer(NotepadFrame *frame) : m_frame(frame) {}
+    explicit ClearTextServer(ClearTextFrame *frame) : m_frame(frame) {}
 
     wxConnectionBase *OnAcceptConnection(const wxString &topic) override
     {
         if (topic != IPC_TOPIC) return nullptr;
-        return new NotepadConnection(m_frame);
+        return new ClearTextConnection(m_frame);
     }
 
 private:
-    NotepadFrame *m_frame;
+    ClearTextFrame *m_frame;
 };
 
 // Tries to hand `files` off to an already-running instance. Returns true if
@@ -932,13 +932,13 @@ static bool SendToRunningInstance(const wxArrayString &files)
     return true;
 }
 
-class NotepadApp : public wxApp
+class ClearTextApp : public wxApp
 {
 public:
     bool OnInit() override
     {
         m_instanceChecker = new wxSingleInstanceChecker(
-            "Notepad-" + wxGetUserId());
+            "ClearText-" + wxGetUserId());
 
         wxArrayString filesToOpen;
         for (int i = 1; i < argc; i++)
@@ -956,7 +956,7 @@ public:
             // (e.g. the other instance is stuck/unresponsive).
         }
 
-        NotepadFrame *frame = new NotepadFrame();
+        ClearTextFrame *frame = new ClearTextFrame();
 
 #ifndef WIN32
         if (wxFileExists(IPC_SERVICE))
@@ -965,7 +965,7 @@ public:
             wxRemoveFile(IPC_SERVICE);
         }
 #endif
-        m_server = new NotepadServer(frame);
+        m_server = new ClearTextServer(frame);
         if (!m_server->Create(IPC_SERVICE))
         {
             delete m_server;
@@ -990,7 +990,7 @@ public:
 
 private:
     wxSingleInstanceChecker *m_instanceChecker = nullptr;
-    NotepadServer *m_server = nullptr;
+    ClearTextServer *m_server = nullptr;
 };
 
-wxIMPLEMENT_APP(NotepadApp);
+wxIMPLEMENT_APP(ClearTextApp);
