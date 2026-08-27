@@ -319,6 +319,7 @@ enum
     ID_FindNext,
     ID_WrapAround,
     ID_WordWrap,
+    ID_ToggleFullScreen,
     ID_ThemeBase // must stay last: one radio menu id per entry in AllThemes()
 };
 
@@ -366,6 +367,8 @@ public:
         viewMenu->Append(wxID_ZOOM_IN, "Increase Font Size\tCtrl+=");
         viewMenu->Append(wxID_ZOOM_OUT, "Decrease Font Size\tCtrl+-");
         viewMenu->Append(wxID_ZOOM_100, "Reset Font Size\tCtrl+0");
+        viewMenu->AppendSeparator();
+        viewMenu->Append(ID_ToggleFullScreen, "Full Screen\tF11");
         menuBar->Append(viewMenu, "&View");
 
         wxMenu *themeMenu = new wxMenu();
@@ -416,6 +419,7 @@ public:
         Bind(wxEVT_MENU, &ClearTextFrame::OnZoomIn, this, wxID_ZOOM_IN);
         Bind(wxEVT_MENU, &ClearTextFrame::OnZoomOut, this, wxID_ZOOM_OUT);
         Bind(wxEVT_MENU, &ClearTextFrame::OnZoomReset, this, wxID_ZOOM_100);
+        Bind(wxEVT_MENU, &ClearTextFrame::OnToggleFullScreen, this, ID_ToggleFullScreen);
         Bind(wxEVT_MENU, &ClearTextFrame::OnSetTheme, this, ID_ThemeBase,
              ID_ThemeBase + (int)AllThemes().size() - 1);
         Bind(wxEVT_FIND, &ClearTextFrame::OnFindDialogEvent, this);
@@ -905,6 +909,13 @@ private:
         ReapplyHighlightingToAllTabs();
     }
 
+    void OnToggleFullScreen(wxCommandEvent &event)
+    {
+        // Keep the menu bar visible in full screen (unlike the default
+        // wxFULLSCREEN_ALL, which hides it along with the toolbar/statusbar).
+        ShowFullScreen(!IsFullScreen(), wxFULLSCREEN_NOTOOLBAR | wxFULLSCREEN_NOSTATUSBAR |
+            wxFULLSCREEN_NOBORDER | wxFULLSCREEN_NOCAPTION);
+    }
     void OnZoomIn(wxCommandEvent &event) { ChangeFontSize(+1); }
     void OnZoomOut(wxCommandEvent &event) { ChangeFontSize(-1); }
 
