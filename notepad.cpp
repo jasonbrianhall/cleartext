@@ -5,6 +5,8 @@
 #include <wx/print.h>
 #include <wx/aboutdlg.h>
 #include <wx/fdrepdlg.h>
+#include <wx/snglinst.h>
+#include <wx/ipc.h>
 
 // Simple printout that paginates plain text across pages using the
 // device context's own text-measurement, so it scales to any paper size.
@@ -393,8 +395,10 @@ private:
         if (!content.IsEmpty())
             stc->SetText(content);
         stc->EmptyUndoBuffer();
+        stc->SetSavePoint(); // mark this freshly-loaded content as "unmodified"
 
-        stc->Bind(wxEVT_STC_MODIFIED, &NotepadFrame::OnTextModified, this);
+        stc->Bind(wxEVT_STC_SAVEPOINTLEFT, &NotepadFrame::OnSavePointLeft, this);
+        stc->Bind(wxEVT_STC_SAVEPOINTREACHED, &NotepadFrame::OnSavePointReached, this);
         stc->Bind(wxEVT_STC_CHANGE, &NotepadFrame::OnLineCountChange, this);
         stc->Bind(wxEVT_STC_ZOOM, &NotepadFrame::OnZoomChanged, this);
 
@@ -427,13 +431,29 @@ private:
         return wxNOT_FOUND;
     }
 
-    void OnTextModified(wxStyledTextEvent &event)
+    // Scintilla's own "save point" tracks modification relative to the last
+    // SetSavePoint() call, rather than every text-change event — so loading
+    // a file's initial content, or undoing back to a saved state, doesn't
+    // falsely mark the tab as modified.
+    void OnSavePointLeft(wxStyledTextEvent &event)
     {
         wxStyledTextCtrl *stc = (wxStyledTextCtrl*)event.GetEventObject();
         int index = IndexOf(stc);
         if (index != wxNOT_FOUND && !m_tabData[index].modified)
         {
             m_tabData[index].modified = true;
+            UpdateTabLabel(index);
+        }
+        event.Skip();
+    }
+
+    void OnSavePointReached(wxStyledTextEvent &event)
+    {
+        wxStyledTextCtrl *stc = (wxStyledTextCtrl*)event.GetEventObject();
+        int index = IndexOf(stc);
+        if (index != wxNOT_FOUND && m_tabData[index].modified)
+        {
+            m_tabData[index].modified = false;
             UpdateTabLabel(index);
         }
         event.Skip();
@@ -518,6 +538,7 @@ private:
         }
 
         m_tabData[index].modified = false;
+        stc->SetSavePoint();
         UpdateTabLabel(index);
         UpdateTitle();
         return true;
@@ -813,25 +834,151 @@ private:
     }
 };
 
+// ============================================================================
+// SINGLE-INSTANCE / IPC
+// A second launch of notepad hands its file arguments to the already-running
+// instance (as new tabs) instead of opening a second window.
+// ============================================================================
+
+// A local TCP port is used on Windows (no AF_UNIX support in older
+// toolchains); on Linux/macOS a per-user Unix domain socket is used instead,
+// which — like gedit's D-Bus based activation — is scoped to this session
+// and user rather than a guessable, potentially-colliding network port.
+#ifdef WIN32
+static const wxString IPC_SERVICE = "47230";
+#else
+static const wxString IPC_SERVICE =
+    wxString::Format("/tmp/notepad-ipc-%s", wxGetUserId());
+#endif
+static const wxString IPC_TOPIC = "notepad";
+
+class NotepadConnection : public wxConnection
+{
+public:
+    explicit NotepadConnection(NotepadFrame *frame) : m_frame(frame) {}
+
+    bool OnExec(const wxString &topic, const wxString &data) override
+    {
+        if (topic != IPC_TOPIC) return false;
+
+        if (!data.IsEmpty())
+        {
+            m_frame->OpenFilePath(data);
+            m_frame->CloseInitialBlankTabIfUnused();
+        }
+
+        if (m_frame->IsIconized()) m_frame->Iconize(false);
+        m_frame->Raise();
+        m_frame->RequestUserAttention();
+        return true;
+    }
+
+private:
+    NotepadFrame *m_frame;
+};
+
+class NotepadServer : public wxServer
+{
+public:
+    explicit NotepadServer(NotepadFrame *frame) : m_frame(frame) {}
+
+    wxConnectionBase *OnAcceptConnection(const wxString &topic) override
+    {
+        if (topic != IPC_TOPIC) return nullptr;
+        return new NotepadConnection(m_frame);
+    }
+
+private:
+    NotepadFrame *m_frame;
+};
+
+// Tries to hand `files` off to an already-running instance. Returns true if
+// a running instance accepted the connection (whether or not `files` was
+// empty — an empty list just raises the existing window).
+static bool SendToRunningInstance(const wxArrayString &files)
+{
+    wxClient client;
+    wxConnectionBase *conn = client.MakeConnection("localhost", IPC_SERVICE, IPC_TOPIC);
+    if (!conn) return false;
+
+    if (files.IsEmpty())
+    {
+        conn->Execute("");
+    }
+    else
+    {
+        for (const wxString &f : files)
+        {
+            wxFileName fn(f);
+            fn.MakeAbsolute(); // resolve against our cwd, not the running instance's
+            conn->Execute(fn.GetFullPath());
+        }
+    }
+
+    conn->Disconnect();
+    delete conn;
+    return true;
+}
+
 class NotepadApp : public wxApp
 {
 public:
     bool OnInit() override
     {
+        m_instanceChecker = new wxSingleInstanceChecker(
+            "Notepad-" + wxGetUserId());
+
+        wxArrayString filesToOpen;
+        for (int i = 1; i < argc; i++)
+            filesToOpen.Add(argv[i]);
+
+        if (m_instanceChecker->IsAnotherRunning())
+        {
+            if (SendToRunningInstance(filesToOpen))
+            {
+                delete m_instanceChecker;
+                m_instanceChecker = nullptr;
+                return false; // hand-off succeeded, don't open a new window
+            }
+            // Fall through and open our own window if IPC didn't work
+            // (e.g. the other instance is stuck/unresponsive).
+        }
+
         NotepadFrame *frame = new NotepadFrame();
 
-        // Any non-option arguments are treated as files to open.
-        for (int i = 1; i < argc; i++)
-            frame->OpenFilePath(argv[i]);
+#ifndef WIN32
+        if (wxFileExists(IPC_SERVICE))
+        {
+            wxLogNull noLog; // stale socket removal is best-effort, not worth a popup
+            wxRemoveFile(IPC_SERVICE);
+        }
+#endif
+        m_server = new NotepadServer(frame);
+        if (!m_server->Create(IPC_SERVICE))
+        {
+            delete m_server;
+            m_server = nullptr; // non-fatal: this instance just won't receive hand-offs
+        }
 
-        // Drop the initial blank "Untitled" tab once real files are open,
-        // as long as it's still untouched.
-        if (argc > 1)
+        for (const wxString &f : filesToOpen)
+            frame->OpenFilePath(f);
+        if (!filesToOpen.IsEmpty())
             frame->CloseInitialBlankTabIfUnused();
 
         frame->Show();
         return true;
     }
+
+    int OnExit() override
+    {
+        delete m_server;
+        delete m_instanceChecker;
+        return wxApp::OnExit();
+    }
+
+private:
+    wxSingleInstanceChecker *m_instanceChecker = nullptr;
+    NotepadServer *m_server = nullptr;
 };
 
 wxIMPLEMENT_APP(NotepadApp);
