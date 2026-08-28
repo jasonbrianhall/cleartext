@@ -1162,7 +1162,11 @@ void ClearTextFrame::OnCopyAsHtml(wxCommandEvent &event)
     if (!wxTheClipboard->Open()) return;
     wxDataObjectComposite *composite = new wxDataObjectComposite();
     composite->Add(new wxHTMLDataObject(html), true); // preferred format
-    composite->Add(new wxTextDataObject(plainText));
+    // Plain-text targets (including pasting back into ClearText itself,
+    // which is a plain-text-only wxStyledTextCtrl) get the HTML source
+    // itself rather than the original unstyled code, so "Copy as HTML"
+    // reliably yields HTML wherever it lands.
+    composite->Add(new wxTextDataObject(html));
     wxTheClipboard->SetData(composite);
     wxTheClipboard->Close();
 }

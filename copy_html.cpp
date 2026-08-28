@@ -85,6 +85,15 @@ wxString BuildHtmlFromStc(wxStyledTextCtrl *stc)
     pre << "</pre>";
 
     wxString doc;
-    doc << "<html><head><meta charset=\"utf-8\"></head><body>" << pre << "</body></html>";
+    doc << "<!DOCTYPE html>\n"
+        << "<html lang=\"en\">\n"
+        << "<head>\n"
+        << "<meta charset=\"utf-8\">\n"
+        << "<title>ClearText Export</title>\n"
+        << "</head>\n"
+        << "<body style=\"margin:0;background-color:" << ColourToHex(bg) << ";\">\n"
+        << pre << "\n"
+        << "</body>\n"
+        << "</html>\n";
     return doc;
 }
