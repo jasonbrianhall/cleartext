@@ -103,6 +103,33 @@ static void SetCommonStyleDefaults(wxStyledTextCtrl *stc)
     stc->StyleSetForeground(wxSTC_STYLE_LINENUMBER, th.marginFg);
     stc->SetWhitespaceBackground(true, th.background);
     stc->SetWhitespaceForeground(true, th.marginFg);
+
+    // Current-line highlight: a subtle background band that follows the
+    // caret, reusing the margin color so it reads as "highlighted" without
+    // clashing with the selection color.
+    stc->SetCaretLineVisible(true);
+    stc->SetCaretLineBackground(th.marginBg);
+
+    // Matched/unmatched brace highlighting (see ClearTextFrame::OnEditorUpdateUI,
+    // which calls BraceHighlight/BraceBadLight as the caret moves).
+    stc->StyleSetForeground(wxSTC_STYLE_BRACELIGHT, th.keyword2);
+    stc->StyleSetBackground(wxSTC_STYLE_BRACELIGHT, th.selectionBg);
+    stc->StyleSetBold(wxSTC_STYLE_BRACELIGHT, true);
+    stc->StyleSetForeground(wxSTC_STYLE_BRACEBAD, wxColour(220, 60, 60));
+    stc->StyleSetBold(wxSTC_STYLE_BRACEBAD, true);
+
+    // Fold margin markers (see ClearTextFrame::SetupEditor for the margin
+    // itself, and OnMarginClick for toggling). Plain +/- glyphs rather than
+    // the boxed/connector style, so they don't need extra theme colors.
+    stc->SetFoldMarginColour(true, th.marginBg);
+    stc->SetFoldMarginHiColour(true, th.marginBg);
+    stc->MarkerDefine(wxSTC_MARKNUM_FOLDEROPEN, wxSTC_MARK_MINUS, th.marginFg, th.marginBg);
+    stc->MarkerDefine(wxSTC_MARKNUM_FOLDER, wxSTC_MARK_PLUS, th.marginFg, th.marginBg);
+    stc->MarkerDefine(wxSTC_MARKNUM_FOLDERSUB, wxSTC_MARK_EMPTY, th.marginFg, th.marginBg);
+    stc->MarkerDefine(wxSTC_MARKNUM_FOLDERTAIL, wxSTC_MARK_EMPTY, th.marginFg, th.marginBg);
+    stc->MarkerDefine(wxSTC_MARKNUM_FOLDEREND, wxSTC_MARK_PLUS, th.marginFg, th.marginBg);
+    stc->MarkerDefine(wxSTC_MARKNUM_FOLDEROPENMID, wxSTC_MARK_MINUS, th.marginFg, th.marginBg);
+    stc->MarkerDefine(wxSTC_MARKNUM_FOLDERMIDTAIL, wxSTC_MARK_EMPTY, th.marginFg, th.marginBg);
 }
 
 static void ApplyPlainText(wxStyledTextCtrl *stc)

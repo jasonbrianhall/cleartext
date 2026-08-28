@@ -9,6 +9,8 @@
 #include <wx/ipc.h>
 #include <wx/fileconf.h>
 #include <wx/stdpaths.h>
+#include <wx/numdlg.h>
+#include <wx/datetime.h>
 #include <vector>
 #include "themes.h"
 #include "highlighting.h"
@@ -123,6 +125,13 @@ static wxString GetConfigFilePath()
     return dir + wxFileName::GetPathSeparator() + "cleartext.conf";
 }
 
+// True for the ASCII characters Scintilla's brace-matching understands.
+// Used by OnEditorUpdateUI to decide whether the caret is next to a brace.
+static bool IsBraceChar(int ch)
+{
+    return ch == '(' || ch == ')' || ch == '[' || ch == ']' || ch == '{' || ch == '}';
+}
+
 enum
 {
     ID_NewTab = wxID_HIGHEST + 1,
@@ -131,8 +140,15 @@ enum
     ID_WrapAround,
     ID_WordWrap,
     ID_ToggleFullScreen,
-    ID_ThemeBase, // one radio menu id per entry in AllThemes()...
-    ID_LanguageBase = ID_ThemeBase + 64 // ...then one per entry in AllLanguages(). Gap must exceed AllThemes().size().
+    ID_GoToLine,
+    ID_SaveAll,
+    ID_Reload,
+    ID_ShowWhitespace,
+    ID_TrimTrailingWhitespace,
+    ID_ThemeBase = wxID_HIGHEST + 100,        // one radio id per entry in AllThemes()...
+    ID_LanguageBase = ID_ThemeBase + 64,      // ...then one per entry in AllLanguages()...
+    ID_RecentFileBase = ID_LanguageBase + 64, // ...then one per recent-file slot...
+    ID_ClearRecentFiles = ID_RecentFileBase + 32 // ...leaving room for kMaxRecentFiles entries.
 };
 
 class ClearTextFrame : public wxFrame
@@ -140,13 +156,21 @@ class ClearTextFrame : public wxFrame
 public:
     ClearTextFrame() : wxFrame(nullptr, wxID_ANY, "ClearText", wxDefaultPosition, wxSize(800, 600))
     {
+        LoadFrameSettings(); // recent files + whitespace toggles -- reads the config ClearTextApp::LoadConfig() already installed before this ctor runs
+
         wxMenuBar *menuBar = new wxMenuBar();
 
         wxMenu *fileMenu = new wxMenu();
         fileMenu->Append(ID_NewTab, "New Tab\tCtrl+T");
         fileMenu->Append(wxID_OPEN, "Open...\tCtrl+O");
+        m_recentMenu = new wxMenu();
+        fileMenu->AppendSubMenu(m_recentMenu, "Open Recent");
+        RebuildRecentFilesMenu();
+        fileMenu->AppendSeparator();
         fileMenu->Append(wxID_SAVE, "Save\tCtrl+S");
         fileMenu->Append(wxID_SAVEAS, "Save As...\tCtrl+Shift+S");
+        fileMenu->Append(ID_SaveAll, "Save All\tCtrl+Alt+S");
+        fileMenu->Append(ID_Reload, "Reload from Disk\tCtrl+Shift+R");
         fileMenu->AppendSeparator();
         fileMenu->Append(wxID_PRINT, "Print...\tCtrl+P");
         fileMenu->AppendSeparator();
@@ -170,11 +194,17 @@ public:
         editMenu->Append(wxID_REPLACE, "Replace...\tCtrl+H");
         wxMenuItem *wrapItem = editMenu->AppendCheckItem(ID_WrapAround, "Wrap Around");
         wrapItem->Check(true);
+        editMenu->AppendSeparator();
+        editMenu->Append(ID_GoToLine, "Go To Line...\tCtrl+G");
         menuBar->Append(editMenu, "&Edit");
 
         wxMenu *viewMenu = new wxMenu();
         wxMenuItem *wordWrapItem = viewMenu->AppendCheckItem(ID_WordWrap, "Word Wrap");
         wordWrapItem->Check(true);
+        wxMenuItem *wsItem = viewMenu->AppendCheckItem(ID_ShowWhitespace, "Show Whitespace");
+        wsItem->Check(m_showWhitespace);
+        wxMenuItem *trimItem = viewMenu->AppendCheckItem(ID_TrimTrailingWhitespace, "Trim Trailing Whitespace on Save");
+        trimItem->Check(m_trimTrailingWhitespace);
         viewMenu->AppendSeparator();
         viewMenu->Append(wxID_ZOOM_IN, "Increase Font Size\tCtrl+=");
         viewMenu->Append(wxID_ZOOM_OUT, "Decrease Font Size\tCtrl+-");
@@ -227,6 +257,8 @@ public:
         Bind(wxEVT_MENU, &ClearTextFrame::OnOpen, this, wxID_OPEN);
         Bind(wxEVT_MENU, &ClearTextFrame::OnSave, this, wxID_SAVE);
         Bind(wxEVT_MENU, &ClearTextFrame::OnSaveAs, this, wxID_SAVEAS);
+        Bind(wxEVT_MENU, &ClearTextFrame::OnSaveAll, this, ID_SaveAll);
+        Bind(wxEVT_MENU, &ClearTextFrame::OnReload, this, ID_Reload);
         Bind(wxEVT_MENU, &ClearTextFrame::OnExit, this, wxID_EXIT);
         Bind(wxEVT_MENU, &ClearTextFrame::OnUndo, this, wxID_UNDO);
         Bind(wxEVT_MENU, &ClearTextFrame::OnRedo, this, wxID_REDO);
@@ -239,8 +271,11 @@ public:
         Bind(wxEVT_MENU, &ClearTextFrame::OnFindMenu, this, wxID_FIND);
         Bind(wxEVT_MENU, &ClearTextFrame::OnReplaceMenu, this, wxID_REPLACE);
         Bind(wxEVT_MENU, &ClearTextFrame::OnFindNext, this, ID_FindNext);
+        Bind(wxEVT_MENU, &ClearTextFrame::OnGoToLine, this, ID_GoToLine);
         Bind(wxEVT_MENU, &ClearTextFrame::OnToggleWrapAround, this, ID_WrapAround);
         Bind(wxEVT_MENU, &ClearTextFrame::OnToggleWordWrap, this, ID_WordWrap);
+        Bind(wxEVT_MENU, &ClearTextFrame::OnToggleShowWhitespace, this, ID_ShowWhitespace);
+        Bind(wxEVT_MENU, &ClearTextFrame::OnToggleTrimTrailingWhitespace, this, ID_TrimTrailingWhitespace);
         Bind(wxEVT_MENU, &ClearTextFrame::OnZoomIn, this, wxID_ZOOM_IN);
         Bind(wxEVT_MENU, &ClearTextFrame::OnZoomOut, this, wxID_ZOOM_OUT);
         Bind(wxEVT_MENU, &ClearTextFrame::OnZoomReset, this, wxID_ZOOM_100);
@@ -249,6 +284,9 @@ public:
              ID_ThemeBase + (int)AllThemes().size() - 1);
         Bind(wxEVT_MENU, &ClearTextFrame::OnSetLanguage, this, ID_LanguageBase,
              ID_LanguageBase + (int)AllLanguages().size() - 1);
+        Bind(wxEVT_MENU, &ClearTextFrame::OnOpenRecent, this, ID_RecentFileBase,
+             ID_RecentFileBase + (int)kMaxRecentFiles - 1);
+        Bind(wxEVT_MENU, &ClearTextFrame::OnClearRecentFiles, this, ID_ClearRecentFiles);
         Bind(wxEVT_FIND, &ClearTextFrame::OnFindDialogEvent, this);
         Bind(wxEVT_FIND_NEXT, &ClearTextFrame::OnFindDialogEvent, this);
         Bind(wxEVT_FIND_REPLACE, &ClearTextFrame::OnFindDialogEvent, this);
@@ -256,6 +294,7 @@ public:
         Bind(wxEVT_FIND_CLOSE, &ClearTextFrame::OnFindDialogEvent, this);
         Bind(wxEVT_NOTEBOOK_PAGE_CHANGED, &ClearTextFrame::OnPageChanged, this);
         Bind(wxEVT_CLOSE_WINDOW, &ClearTextFrame::OnCloseWindow, this);
+        Bind(wxEVT_ACTIVATE, &ClearTextFrame::OnActivate, this);
     }
 
     // Opens `path` in a new tab, reading its content from disk. Public so
@@ -281,6 +320,7 @@ public:
         }
 
         AddTab(wxFileName(path).GetFullName(), content, path);
+        AddToRecentFiles(path);
     }
 
     // Closes tab 0 if it's still the untouched, unsaved "Untitled" tab
@@ -305,14 +345,24 @@ private:
         // default); any other value is a user override from the Language
         // menu that ignores the extension until changed back to Auto.
         Language language = Language::Auto;
+        // The file's on-disk modification time as of the last open/save/
+        // reload. Invalid (default-constructed) means "not tracked" --
+        // an unsaved-only tab, or one that hasn't been touched yet.
+        wxDateTime fileModTime;
     };
+
+    static const size_t kMaxRecentFiles = 10;
 
     wxNotebook *m_notebook;
     wxMenu *m_languageMenu = nullptr;
+    wxMenu *m_recentMenu = nullptr;
     std::vector<TabData> m_tabData;
+    wxArrayString m_recentFiles;
     wxFindReplaceData m_findData{wxFR_DOWN};
     wxFindReplaceDialog *m_findReplaceDialog = nullptr;
     bool m_wrapAround = true;
+    bool m_showWhitespace = false;
+    bool m_trimTrailingWhitespace = true;
 
     wxStyledTextCtrl* CurrentText()
     {
@@ -330,11 +380,23 @@ private:
     {
         // Line number margin
         stc->SetMarginType(0, wxSTC_MARGIN_NUMBER);
-        stc->SetMarginWidth(1, 0); // hide folding/symbol margin
+        stc->SetMarginWidth(1, 0); // hide the unused symbol margin
+
+        // Fold margin: a clickable +/- gutter (see OnMarginClick) driven by
+        // each lexer's own fold-level computation. Harmless no-op for
+        // lexers/content that don't produce foldable structure.
+        stc->SetMarginType(2, wxSTC_MARGIN_SYMBOL);
+        stc->SetMarginMask(2, wxSTC_MASK_FOLDERS);
+        stc->SetMarginWidth(2, 16);
+        stc->SetMarginSensitive(2, true);
+        stc->SetProperty("fold", "1");
+        stc->SetProperty("fold.compact", "1");
+        stc->SetFoldFlags(wxSTC_FOLDFLAG_LINEBEFORE_CONTRACTED | wxSTC_FOLDFLAG_LINEAFTER_CONTRACTED);
 
         stc->SetTabWidth(4);
         stc->SetUseTabs(false);
         stc->SetWrapMode(wxSTC_WRAP_WORD);
+        stc->SetViewWhiteSpace(m_showWhitespace ? wxSTC_WS_VISIBLEALWAYS : wxSTC_WS_INVISIBLE);
     }
 
     // Grows the line-number margin as the document gains more digits
@@ -349,7 +411,10 @@ private:
     {
         // Push tab metadata BEFORE AddPage, since AddPage synchronously fires
         // a page-changed event whose handler reads m_tabData by index.
-        m_tabData.push_back({filePath, false});
+        m_tabData.push_back(TabData());
+        m_tabData.back().filePath = filePath;
+        if (!filePath.IsEmpty() && wxFileExists(filePath))
+            m_tabData.back().fileModTime = wxFileName(filePath).GetModificationTime();
 
         wxStyledTextCtrl *stc = new wxStyledTextCtrl(m_notebook, wxID_ANY);
         SetupEditor(stc);
@@ -363,6 +428,8 @@ private:
         stc->Bind(wxEVT_STC_SAVEPOINTREACHED, &ClearTextFrame::OnSavePointReached, this);
         stc->Bind(wxEVT_STC_CHANGE, &ClearTextFrame::OnLineCountChange, this);
         stc->Bind(wxEVT_MOUSEWHEEL, &ClearTextFrame::OnMouseWheel, this);
+        stc->Bind(wxEVT_STC_UPDATEUI, &ClearTextFrame::OnEditorUpdateUI, this);
+        stc->Bind(wxEVT_STC_MARGINCLICK, &ClearTextFrame::OnMarginClick, this);
 
         m_notebook->AddPage(stc, title, true);
         UpdateMarginWidth(stc);
@@ -456,11 +523,116 @@ private:
         event.Skip();
     }
 
+    // Fires on caret movement, selection changes, and edits alike -- the
+    // one Scintilla event that covers everything the status bar and brace
+    // highlight need to track.
+    void OnEditorUpdateUI(wxStyledTextEvent &event)
+    {
+        wxStyledTextCtrl *stc = (wxStyledTextCtrl*)event.GetEventObject();
+        UpdateBraceHighlight(stc);
+        if (stc == CurrentText())
+            UpdateStatusBarPosition(stc);
+        event.Skip();
+    }
+
+    // Highlights the brace pair around the caret (checking both the
+    // character under it and just before it, since after typing a brace
+    // the caret sits immediately past it) and flags an unmatched one in red.
+    void UpdateBraceHighlight(wxStyledTextCtrl *stc)
+    {
+        int pos = stc->GetCurrentPos();
+        int ch = pos < stc->GetTextLength() ? stc->GetCharAt(pos) : 0;
+
+        if (!IsBraceChar(ch) && pos > 0)
+        {
+            int chBefore = stc->GetCharAt(pos - 1);
+            if (IsBraceChar(chBefore)) { pos -= 1; ch = chBefore; }
+        }
+
+        if (IsBraceChar(ch))
+        {
+            int match = stc->BraceMatch(pos);
+            if (match != wxSTC_INVALID_POSITION)
+                stc->BraceHighlight(pos, match);
+            else
+                stc->BraceBadLight(pos);
+        }
+        else
+        {
+            stc->BraceHighlight(wxSTC_INVALID_POSITION, wxSTC_INVALID_POSITION);
+        }
+    }
+
+    void UpdateStatusBarPosition(wxStyledTextCtrl *stc)
+    {
+        if (!stc) { SetStatusText(""); return; }
+
+        int pos = stc->GetCurrentPos();
+        int line = stc->LineFromPosition(pos) + 1;
+        int col = stc->GetColumn(pos) + 1;
+        wxString status = wxString::Format("Line %d, Col %d", line, col);
+
+        int selLen = stc->GetSelectionEnd() - stc->GetSelectionStart();
+        if (selLen > 0)
+            status += wxString::Format("   |   %d selected", selLen);
+
+        SetStatusText(status);
+    }
+
+    // Toggles the clicked fold point open/closed.
+    void OnMarginClick(wxStyledTextEvent &event)
+    {
+        if (event.GetMargin() != 2) { event.Skip(); return; }
+        wxStyledTextCtrl *stc = (wxStyledTextCtrl*)event.GetEventObject();
+        stc->ToggleFold(stc->LineFromPosition(event.GetPosition()));
+    }
+
     void OnPageChanged(wxBookCtrlEvent &event)
     {
         UpdateTitle();
         UpdateLanguageMenuChecks();
+
+        int sel = m_notebook->GetSelection();
+        if (sel != wxNOT_FOUND)
+        {
+            CheckExternalModification(sel);
+            UpdateStatusBarPosition(PageText(sel));
+        }
         event.Skip();
+    }
+
+    // When the window regains focus, re-check the active tab for changes
+    // made by another program while ClearText was in the background.
+    void OnActivate(wxActivateEvent &event)
+    {
+        if (event.GetActive())
+        {
+            int sel = m_notebook->GetSelection();
+            if (sel != wxNOT_FOUND) CheckExternalModification(sel);
+        }
+        event.Skip();
+    }
+
+    // Warns and offers to reload if the file backing `index` has a newer
+    // modification time on disk than what we last read/wrote ourselves.
+    void CheckExternalModification(int index)
+    {
+        const wxString &path = m_tabData[index].filePath;
+        if (path.IsEmpty() || !wxFileExists(path)) return;
+
+        wxDateTime diskTime = wxFileName(path).GetModificationTime();
+        if (!diskTime.IsValid() || !m_tabData[index].fileModTime.IsValid()) return;
+        if (diskTime <= m_tabData[index].fileModTime) return;
+
+        // Record the new time before prompting so a "No" answer doesn't
+        // trigger the same prompt again on every focus/tab switch.
+        m_tabData[index].fileModTime = diskTime;
+
+        int result = wxMessageBox(
+            "\"" + wxFileName(path).GetFullName() + "\" has changed on disk.\n\nReload it?",
+            "File Changed", wxYES_NO | wxICON_WARNING, this);
+        if (result == wxYES)
+            ReloadTab(index, true);
     }
 
     // Re-applies highlighting (theme + font size + lexer) to every open tab.
@@ -552,6 +724,9 @@ private:
             UpdateMarginWidth(stc);
         }
 
+        if (m_trimTrailingWhitespace)
+            TrimTrailingWhitespace(stc);
+
         wxFile file(m_tabData[index].filePath, wxFile::write);
         if (!file.IsOpened() || !file.Write(stc->GetText()))
         {
@@ -560,7 +735,96 @@ private:
         }
 
         m_tabData[index].modified = false;
+        m_tabData[index].fileModTime = wxFileName(m_tabData[index].filePath).GetModificationTime();
         stc->SetSavePoint();
+        UpdateTabLabel(index);
+        UpdateTitle();
+        AddToRecentFiles(m_tabData[index].filePath);
+        return true;
+    }
+
+    // Strips trailing spaces/tabs from every line (never touching the
+    // line-ending characters themselves), as a single undo-able edit.
+    // Called from SaveTab when the "Trim Trailing Whitespace on Save"
+    // option is on.
+    void TrimTrailingWhitespace(wxStyledTextCtrl *stc)
+    {
+        int caretPos = stc->GetCurrentPos();
+        int lineCount = stc->GetLineCount();
+
+        stc->BeginUndoAction();
+        for (int line = 0; line < lineCount; line++)
+        {
+            int lineStart = stc->PositionFromLine(line);
+            int lineEnd = stc->GetLineEndPosition(line); // excludes EOL chars
+            int trimStart = lineEnd;
+            while (trimStart > lineStart)
+            {
+                int ch = stc->GetCharAt(trimStart - 1);
+                if (ch != ' ' && ch != '\t') break;
+                trimStart--;
+            }
+            if (trimStart < lineEnd)
+            {
+                stc->SetTargetStart(trimStart);
+                stc->SetTargetEnd(lineEnd);
+                stc->ReplaceTarget("");
+            }
+        }
+        stc->EndUndoAction();
+
+        stc->SetCurrentPos(wxMin(caretPos, stc->GetTextLength()));
+    }
+
+    void OnSaveAll(wxCommandEvent &event)
+    {
+        for (size_t i = 0; i < m_tabData.size(); i++)
+            if (m_tabData[i].modified)
+                if (!SaveTab((int)i)) return; // cancelled/failed -- leave the rest untouched
+    }
+
+    void OnReload(wxCommandEvent &event)
+    {
+        int sel = m_notebook->GetSelection();
+        if (sel == wxNOT_FOUND) return;
+        ReloadTab(sel, false);
+    }
+
+    // Re-reads `index`'s file from disk, discarding any in-editor changes.
+    // With `force` false and the tab modified, confirms with the user first
+    // (used by the Reload menu item); `force` true skips the prompt (used
+    // by CheckExternalModification, which has already asked).
+    bool ReloadTab(int index, bool force)
+    {
+        const wxString &path = m_tabData[index].filePath;
+        if (path.IsEmpty() || !wxFileExists(path)) return false;
+
+        if (!force && m_tabData[index].modified)
+        {
+            int result = wxMessageBox(
+                "Discard unsaved changes and reload \"" + wxFileName(path).GetFullName() +
+                    "\" from disk?",
+                "Reload File", wxYES_NO | wxICON_QUESTION, this);
+            if (result != wxYES) return false;
+        }
+
+        wxString content;
+        wxFile file(path);
+        if (!file.IsOpened() || !file.ReadAll(&content))
+        {
+            wxMessageBox("Could not reload file:\n" + path, "Error", wxOK | wxICON_ERROR, this);
+            return false;
+        }
+
+        wxStyledTextCtrl *stc = PageText(index);
+        int firstVisible = stc->GetFirstVisibleLine();
+        stc->SetText(content);
+        stc->EmptyUndoBuffer();
+        stc->SetSavePoint();
+        stc->SetFirstVisibleLine(firstVisible);
+
+        m_tabData[index].modified = false;
+        m_tabData[index].fileModTime = wxFileName(path).GetModificationTime();
         UpdateTabLabel(index);
         UpdateTitle();
         return true;
@@ -632,6 +896,8 @@ private:
 
         cfg->Write("Theme", (long)GetThemeIndex());
         cfg->Write("FontSize", (long)GetFontSize());
+        cfg->Write("ShowWhitespace", m_showWhitespace);
+        cfg->Write("TrimTrailingWhitespace", m_trimTrailingWhitespace);
 
         cfg->DeleteGroup("LastSession");
         cfg->Write("LastSession/Count", (long)openFiles.size());
@@ -639,6 +905,106 @@ private:
             cfg->Write(wxString::Format("LastSession/File%zu", i), openFiles[i]);
 
         cfg->Flush();
+    }
+
+    // Reads recent-files and whitespace-toggle state from the config file
+    // ClearTextApp::LoadConfig() already installed as the process default,
+    // before this frame's menus (which display that state) are built.
+    void LoadFrameSettings()
+    {
+        wxConfigBase *cfg = wxConfigBase::Get(false);
+        if (!cfg) return;
+
+        long count = 0;
+        cfg->Read("RecentFiles/Count", &count, 0L);
+        for (long i = 0; i < count && m_recentFiles.size() < kMaxRecentFiles; i++)
+        {
+            wxString path;
+            if (cfg->Read(wxString::Format("RecentFiles/File%ld", i), &path) && !path.IsEmpty())
+                m_recentFiles.Add(path);
+        }
+
+        cfg->Read("ShowWhitespace", &m_showWhitespace, false);
+        cfg->Read("TrimTrailingWhitespace", &m_trimTrailingWhitespace, true);
+    }
+
+    void SaveRecentFiles()
+    {
+        wxConfigBase *cfg = wxConfigBase::Get(false);
+        if (!cfg) return;
+
+        cfg->DeleteGroup("RecentFiles");
+        cfg->Write("RecentFiles/Count", (long)m_recentFiles.size());
+        for (size_t i = 0; i < m_recentFiles.size(); i++)
+            cfg->Write(wxString::Format("RecentFiles/File%zu", i), m_recentFiles[i]);
+        cfg->Flush();
+    }
+
+    // Moves `path` to the front of the recent-files list (adding it if new),
+    // caps the list at kMaxRecentFiles, and persists immediately -- called
+    // whenever a tab gets a concrete on-disk path via open or save.
+    void AddToRecentFiles(const wxString &path)
+    {
+        if (path.IsEmpty()) return;
+
+        wxFileName fn(path);
+        fn.MakeAbsolute();
+        wxString full = fn.GetFullPath();
+
+        int existing = m_recentFiles.Index(full);
+        if (existing != wxNOT_FOUND) m_recentFiles.RemoveAt(existing);
+        m_recentFiles.Insert(full, 0);
+        while (m_recentFiles.size() > kMaxRecentFiles)
+            m_recentFiles.RemoveAt(m_recentFiles.size() - 1);
+
+        RebuildRecentFilesMenu();
+        SaveRecentFiles();
+    }
+
+    // Clears and repopulates m_recentMenu's items from m_recentFiles.
+    void RebuildRecentFilesMenu()
+    {
+        while (m_recentMenu->GetMenuItemCount() > 0)
+            m_recentMenu->Destroy(m_recentMenu->FindItemByPosition(0));
+
+        if (m_recentFiles.IsEmpty())
+        {
+            wxMenuItem *empty = m_recentMenu->Append(wxID_ANY, "(No Recent Files)");
+            empty->Enable(false);
+            return;
+        }
+
+        for (size_t i = 0; i < m_recentFiles.size(); i++)
+        {
+            wxString label = wxString::Format("&%d %s", (int)i + 1, m_recentFiles[i]);
+            m_recentMenu->Append(ID_RecentFileBase + (int)i, label);
+        }
+        m_recentMenu->AppendSeparator();
+        m_recentMenu->Append(ID_ClearRecentFiles, "Clear Recent Files");
+    }
+
+    void OnOpenRecent(wxCommandEvent &event)
+    {
+        int idx = event.GetId() - ID_RecentFileBase;
+        if (idx < 0 || idx >= (int)m_recentFiles.size()) return;
+
+        wxString path = m_recentFiles[idx];
+        if (!wxFileExists(path))
+        {
+            wxMessageBox("File no longer exists:\n" + path, "Open Recent", wxOK | wxICON_WARNING, this);
+            m_recentFiles.RemoveAt(idx);
+            RebuildRecentFilesMenu();
+            SaveRecentFiles();
+            return;
+        }
+        OpenFilePath(path);
+    }
+
+    void OnClearRecentFiles(wxCommandEvent &event)
+    {
+        m_recentFiles.Clear();
+        RebuildRecentFilesMenu();
+        SaveRecentFiles();
     }
 
     void OnUndo(wxCommandEvent &event) { if (auto *t = CurrentText()) t->Undo(); }
@@ -769,11 +1135,41 @@ private:
     void OnReplaceMenu(wxCommandEvent &event) { ShowFindDialog(true); }
     void OnToggleWrapAround(wxCommandEvent &event) { m_wrapAround = event.IsChecked(); }
 
+    void OnGoToLine(wxCommandEvent &event)
+    {
+        wxStyledTextCtrl *stc = CurrentText();
+        if (!stc) return;
+
+        long maxLine = stc->GetLineCount();
+        long current = stc->LineFromPosition(stc->GetCurrentPos()) + 1;
+        long line = wxGetNumberFromUser(
+            wxString::Format("Line number (1-%ld):", maxLine),
+            "Line:", "Go To Line", current, 1, maxLine, this);
+        if (line == -1) return; // cancelled
+
+        stc->GotoLine((int)line - 1);
+        stc->EnsureCaretVisible();
+        stc->SetFocus();
+    }
+
     void OnToggleWordWrap(wxCommandEvent &event)
     {
         int mode = event.IsChecked() ? wxSTC_WRAP_WORD : wxSTC_WRAP_NONE;
         for (size_t i = 0; i < m_notebook->GetPageCount(); i++)
             PageText((int)i)->SetWrapMode(mode);
+    }
+
+    void OnToggleShowWhitespace(wxCommandEvent &event)
+    {
+        m_showWhitespace = event.IsChecked();
+        int mode = m_showWhitespace ? wxSTC_WS_VISIBLEALWAYS : wxSTC_WS_INVISIBLE;
+        for (size_t i = 0; i < m_notebook->GetPageCount(); i++)
+            PageText((int)i)->SetViewWhiteSpace(mode);
+    }
+
+    void OnToggleTrimTrailingWhitespace(wxCommandEvent &event)
+    {
+        m_trimTrailingWhitespace = event.IsChecked();
     }
 
     // These resize the actual base font (persisted, whole-window) rather
