@@ -11,6 +11,7 @@
 #include <wx/stdpaths.h>
 #include <vector>
 #include "themes.h"
+#include "highlighting.h"
 
 // Simple printout that paginates plain text across pages using the
 // device context's own text-measurement, so it scales to any paper size.
@@ -122,196 +123,6 @@ static wxString GetConfigFilePath()
     return dir + wxFileName::GetPathSeparator() + "cleartext.conf";
 }
 
-// ============================================================================
-// SYNTAX HIGHLIGHTING (Scintilla built-in lexers, chosen by file extension)
-// ============================================================================
-
-// Index into AllThemes() for the currently active theme, applied to every
-// tab (existing and new). A plain process-wide global rather than a frame
-// member since the lexer helper functions below are free functions shared
-// by every editor instance.
-static int g_themeIndex = 0;
-
-// Base editor font size in points, applied to every tab the same way the
-// theme is. Adjusted via View > Increase/Decrease/Reset Font Size.
-static const int kMinFontSize = 6;
-static const int kMaxFontSize = 36;
-static const int kDefaultFontSize = 10;
-static int g_fontSize = kDefaultFontSize;
-
-static const EditorTheme &CurrentTheme()
-{
-    return AllThemes()[g_themeIndex];
-}
-
-static void SetCommonStyleDefaults(wxStyledTextCtrl *stc)
-{
-    const EditorTheme &th = CurrentTheme();
-
-    // Named lvalue: some wx builds (e.g. mingw wx 3.0) declare
-    // StyleSetFont(int, wxFont&) as a non-const reference, which can't
-    // bind to a temporary.
-    wxFont editorFont(g_fontSize, wxFONTFAMILY_TELETYPE, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL);
-    stc->StyleSetFont(wxSTC_STYLE_DEFAULT, editorFont);
-    stc->StyleSetBackground(wxSTC_STYLE_DEFAULT, th.background);
-    stc->StyleSetForeground(wxSTC_STYLE_DEFAULT, th.foreground);
-    stc->StyleClearAll(); // propagates STYLE_DEFAULT (font/color) to every style
-
-    // Scintilla has its own separate, per-tab "zoom" concept (e.g. from
-    // Ctrl+scroll-wheel) layered on top of the base font size. It's never
-    // persisted, so if it's left non-zero here the displayed size silently
-    // drifts from — and stops matching — the saved FontSize preference.
-    stc->SetZoom(0);
-
-    stc->SetCaretForeground(th.caret);
-    stc->SetSelBackground(true, th.selectionBg);
-    stc->StyleSetBackground(wxSTC_STYLE_LINENUMBER, th.marginBg);
-    stc->StyleSetForeground(wxSTC_STYLE_LINENUMBER, th.marginFg);
-    stc->SetWhitespaceBackground(true, th.background);
-    stc->SetWhitespaceForeground(true, th.marginFg);
-}
-
-static void ApplyPlainText(wxStyledTextCtrl *stc)
-{
-    stc->SetLexer(wxSTC_LEX_NULL);
-    SetCommonStyleDefaults(stc);
-}
-
-static void ApplyCppStyles(wxStyledTextCtrl *stc)
-{
-    const EditorTheme &th = CurrentTheme();
-    stc->SetLexer(wxSTC_LEX_CPP);
-    SetCommonStyleDefaults(stc);
-
-    stc->SetKeyWords(0,
-        "if else for while do return break continue switch case default "
-        "class struct public private protected namespace using template "
-        "typename const static virtual override new delete nullptr enum "
-        "union sizeof this throw try catch friend inline operator explicit "
-        "extern auto volatile unsigned signed short long void int float "
-        "double char bool true false import export function var let");
-
-    stc->StyleSetForeground(wxSTC_C_COMMENT, th.comment);
-    stc->StyleSetForeground(wxSTC_C_COMMENTLINE, th.comment);
-    stc->StyleSetForeground(wxSTC_C_COMMENTDOC, th.comment);
-    stc->StyleSetForeground(wxSTC_C_COMMENTLINEDOC, th.comment);
-    stc->StyleSetForeground(wxSTC_C_NUMBER, th.number);
-    stc->StyleSetForeground(wxSTC_C_STRING, th.string);
-    stc->StyleSetForeground(wxSTC_C_CHARACTER, th.string);
-    stc->StyleSetForeground(wxSTC_C_STRINGEOL, th.string);
-    stc->StyleSetForeground(wxSTC_C_PREPROCESSOR, th.preprocessor);
-    stc->StyleSetForeground(wxSTC_C_WORD, th.keyword);
-    stc->StyleSetBold(wxSTC_C_WORD, true);
-    stc->StyleSetForeground(wxSTC_C_WORD2, th.keyword2);
-    stc->StyleSetForeground(wxSTC_C_OPERATOR, th.operatorColor);
-}
-
-static void ApplyPythonStyles(wxStyledTextCtrl *stc)
-{
-    const EditorTheme &th = CurrentTheme();
-    stc->SetLexer(wxSTC_LEX_PYTHON);
-    SetCommonStyleDefaults(stc);
-
-    stc->SetKeyWords(0,
-        "False None True and as assert async await break class continue "
-        "def del elif else except finally for from global if import in is "
-        "lambda nonlocal not or pass raise return try while with yield");
-
-    stc->StyleSetForeground(wxSTC_P_COMMENTLINE, th.comment);
-    stc->StyleSetForeground(wxSTC_P_COMMENTBLOCK, th.comment);
-    stc->StyleSetForeground(wxSTC_P_NUMBER, th.number);
-    stc->StyleSetForeground(wxSTC_P_STRING, th.string);
-    stc->StyleSetForeground(wxSTC_P_CHARACTER, th.string);
-    stc->StyleSetForeground(wxSTC_P_TRIPLE, th.string);
-    stc->StyleSetForeground(wxSTC_P_TRIPLEDOUBLE, th.string);
-    stc->StyleSetForeground(wxSTC_P_WORD, th.keyword);
-    stc->StyleSetBold(wxSTC_P_WORD, true);
-    stc->StyleSetForeground(wxSTC_P_CLASSNAME, th.keyword2);
-    stc->StyleSetBold(wxSTC_P_CLASSNAME, true);
-    stc->StyleSetForeground(wxSTC_P_DEFNAME, th.keyword2);
-    stc->StyleSetBold(wxSTC_P_DEFNAME, true);
-    stc->StyleSetForeground(wxSTC_P_OPERATOR, th.operatorColor);
-    stc->StyleSetForeground(wxSTC_P_DECORATOR, th.preprocessor);
-}
-
-static void ApplyMarkupStyles(wxStyledTextCtrl *stc, bool isXml)
-{
-    const EditorTheme &th = CurrentTheme();
-    stc->SetLexer(isXml ? wxSTC_LEX_XML : wxSTC_LEX_HTML);
-    SetCommonStyleDefaults(stc);
-
-    stc->StyleSetForeground(wxSTC_H_TAG, th.tag);
-    stc->StyleSetBold(wxSTC_H_TAG, true);
-    stc->StyleSetForeground(wxSTC_H_TAGEND, th.tag);
-    stc->StyleSetForeground(wxSTC_H_ATTRIBUTE, th.number);
-    stc->StyleSetForeground(wxSTC_H_ATTRIBUTEUNKNOWN, th.number);
-    stc->StyleSetForeground(wxSTC_H_DOUBLESTRING, th.string);
-    stc->StyleSetForeground(wxSTC_H_SINGLESTRING, th.string);
-    stc->StyleSetForeground(wxSTC_H_COMMENT, th.comment);
-    stc->StyleSetForeground(wxSTC_H_ENTITY, th.preprocessor);
-    stc->StyleSetForeground(wxSTC_H_NUMBER, th.number);
-}
-
-static void ApplyMarkdownStyles(wxStyledTextCtrl *stc)
-{
-    const EditorTheme &th = CurrentTheme();
-    stc->SetLexer(wxSTC_LEX_MARKDOWN);
-    SetCommonStyleDefaults(stc);
-
-    // Headers 1-6 all share the same "heading" color; only weight/size vary
-    // a little so bigger headings still read as bigger at a glance.
-    int headerStyles[] = {
-        wxSTC_MARKDOWN_HEADER1, wxSTC_MARKDOWN_HEADER2, wxSTC_MARKDOWN_HEADER3,
-        wxSTC_MARKDOWN_HEADER4, wxSTC_MARKDOWN_HEADER5, wxSTC_MARKDOWN_HEADER6
-    };
-    for (int i = 0; i < 6; i++)
-    {
-        stc->StyleSetForeground(headerStyles[i], th.tag);
-        stc->StyleSetBold(headerStyles[i], true);
-        stc->StyleSetSize(headerStyles[i], 10 + (6 - i)); // H1 largest, H6 smallest
-    }
-
-    stc->StyleSetBold(wxSTC_MARKDOWN_STRONG1, true);
-    stc->StyleSetBold(wxSTC_MARKDOWN_STRONG2, true);
-    stc->StyleSetItalic(wxSTC_MARKDOWN_EM1, true);
-    stc->StyleSetItalic(wxSTC_MARKDOWN_EM2, true);
-    stc->StyleSetForeground(wxSTC_MARKDOWN_STRIKEOUT, th.comment);
-    stc->StyleSetForeground(wxSTC_MARKDOWN_BLOCKQUOTE, th.comment);
-    stc->StyleSetItalic(wxSTC_MARKDOWN_BLOCKQUOTE, true);
-    stc->StyleSetForeground(wxSTC_MARKDOWN_PRECHAR, th.preprocessor);
-    stc->StyleSetForeground(wxSTC_MARKDOWN_ULIST_ITEM, th.preprocessor);
-    stc->StyleSetForeground(wxSTC_MARKDOWN_OLIST_ITEM, th.preprocessor);
-    stc->StyleSetForeground(wxSTC_MARKDOWN_HRULE, th.comment);
-    stc->StyleSetForeground(wxSTC_MARKDOWN_LINK, th.attribute);
-    stc->StyleSetForeground(wxSTC_MARKDOWN_CODE, th.markupCode);
-    stc->StyleSetForeground(wxSTC_MARKDOWN_CODE2, th.markupCode);
-    stc->StyleSetForeground(wxSTC_MARKDOWN_CODEBK, th.markupCode);
-}
-
-// Picks a lexer + color palette based on the file's extension; falls back
-// to plain, unstyled text for unrecognized or missing extensions.
-static void ApplyHighlighting(wxStyledTextCtrl *stc, const wxString &filePath)
-{
-    wxString ext = filePath.IsEmpty() ? "" : wxFileName(filePath).GetExt().Lower();
-
-    if (ext == "c" || ext == "cpp" || ext == "cc" || ext == "cxx" ||
-        ext == "h" || ext == "hpp" || ext == "hxx" ||
-        ext == "java" || ext == "js" || ext == "cs")
-        ApplyCppStyles(stc);
-    else if (ext == "py")
-        ApplyPythonStyles(stc);
-    else if (ext == "html" || ext == "htm")
-        ApplyMarkupStyles(stc, false);
-    else if (ext == "xml")
-        ApplyMarkupStyles(stc, true);
-    else if (ext == "md" || ext == "markdown")
-        ApplyMarkdownStyles(stc);
-    else
-        ApplyPlainText(stc);
-
-    stc->Colourise(0, -1); // force a full re-lex now that styles/keywords changed
-}
-
 enum
 {
     ID_NewTab = wxID_HIGHEST + 1,
@@ -320,7 +131,8 @@ enum
     ID_WrapAround,
     ID_WordWrap,
     ID_ToggleFullScreen,
-    ID_ThemeBase // must stay last: one radio menu id per entry in AllThemes()
+    ID_ThemeBase, // one radio menu id per entry in AllThemes()...
+    ID_LanguageBase = ID_ThemeBase + 64 // ...then one per entry in AllLanguages(). Gap must exceed AllThemes().size().
 };
 
 class ClearTextFrame : public wxFrame
@@ -369,16 +181,29 @@ public:
         viewMenu->Append(wxID_ZOOM_100, "Reset Font Size\tCtrl+0");
         viewMenu->AppendSeparator();
         viewMenu->Append(ID_ToggleFullScreen, "Full Screen\tF11");
-        menuBar->Append(viewMenu, "&View");
+        viewMenu->AppendSeparator();
 
         wxMenu *themeMenu = new wxMenu();
         const std::vector<EditorTheme> &themes = AllThemes();
         for (size_t i = 0; i < themes.size(); i++)
         {
             wxMenuItem *item = themeMenu->AppendRadioItem(ID_ThemeBase + (int)i, themes[i].name);
-            if ((int)i == g_themeIndex) item->Check(true);
+            if ((int)i == GetThemeIndex()) item->Check(true);
         }
-        menuBar->Append(themeMenu, "&Theme");
+        viewMenu->AppendSubMenu(themeMenu, "Theme");
+
+        // Per-tab override of ApplyHighlighting's language, regardless of
+        // the file's extension. "Auto-Detect" (the default) restores
+        // extension-based detection; checkmarks are kept in sync with the
+        // active tab in OnPageChanged/UpdateLanguageMenuChecks.
+        m_languageMenu = new wxMenu();
+        const std::vector<LanguageInfo> &languages = AllLanguages();
+        for (size_t i = 0; i < languages.size(); i++)
+            m_languageMenu->AppendRadioItem(ID_LanguageBase + (int)i, languages[i].label);
+        m_languageMenu->Check(ID_LanguageBase, true); // Auto-Detect, index 0
+        viewMenu->AppendSubMenu(m_languageMenu, "Language");
+
+        menuBar->Append(viewMenu, "&View");
 
         wxMenu *helpMenu = new wxMenu();
         helpMenu->Append(wxID_ABOUT, "About ClearText...");
@@ -422,6 +247,8 @@ public:
         Bind(wxEVT_MENU, &ClearTextFrame::OnToggleFullScreen, this, ID_ToggleFullScreen);
         Bind(wxEVT_MENU, &ClearTextFrame::OnSetTheme, this, ID_ThemeBase,
              ID_ThemeBase + (int)AllThemes().size() - 1);
+        Bind(wxEVT_MENU, &ClearTextFrame::OnSetLanguage, this, ID_LanguageBase,
+             ID_LanguageBase + (int)AllLanguages().size() - 1);
         Bind(wxEVT_FIND, &ClearTextFrame::OnFindDialogEvent, this);
         Bind(wxEVT_FIND_NEXT, &ClearTextFrame::OnFindDialogEvent, this);
         Bind(wxEVT_FIND_REPLACE, &ClearTextFrame::OnFindDialogEvent, this);
@@ -474,9 +301,14 @@ private:
     {
         wxString filePath;
         bool modified = false;
+        // Language::Auto means "detect from filePath's extension" (the
+        // default); any other value is a user override from the Language
+        // menu that ignores the extension until changed back to Auto.
+        Language language = Language::Auto;
     };
 
     wxNotebook *m_notebook;
+    wxMenu *m_languageMenu = nullptr;
     std::vector<TabData> m_tabData;
     wxFindReplaceData m_findData{wxFR_DOWN};
     wxFindReplaceDialog *m_findReplaceDialog = nullptr;
@@ -521,7 +353,7 @@ private:
 
         wxStyledTextCtrl *stc = new wxStyledTextCtrl(m_notebook, wxID_ANY);
         SetupEditor(stc);
-        ApplyHighlighting(stc, filePath);
+        ApplyHighlighting(stc, EffectiveLanguage((int)m_tabData.size() - 1));
         if (!content.IsEmpty())
             stc->SetText(content);
         stc->EmptyUndoBuffer();
@@ -552,6 +384,34 @@ private:
         wxString name = m_tabData[sel].filePath.IsEmpty()
             ? "Untitled" : wxFileName(m_tabData[sel].filePath).GetFullName();
         SetTitle(name + " - ClearText");
+    }
+
+    // Resolves a tab's actual highlighting language: its explicit override
+    // if one was picked from the Language menu, otherwise whatever the
+    // file's extension detects to.
+    Language EffectiveLanguage(int index)
+    {
+        if (m_tabData[index].language != Language::Auto)
+            return m_tabData[index].language;
+        return DetectLanguageFromExtension(m_tabData[index].filePath);
+    }
+
+    // Keeps the Language menu's radio checkmark in sync with the active
+    // tab's override (or Auto-Detect, if it has none).
+    void UpdateLanguageMenuChecks()
+    {
+        int sel = m_notebook->GetSelection();
+        Language lang = (sel == wxNOT_FOUND) ? Language::Auto : m_tabData[sel].language;
+
+        const std::vector<LanguageInfo> &languages = AllLanguages();
+        for (size_t i = 0; i < languages.size(); i++)
+        {
+            if (languages[i].id == lang)
+            {
+                m_languageMenu->Check(ID_LanguageBase + (int)i, true);
+                break;
+            }
+        }
     }
 
     int IndexOf(wxStyledTextCtrl *stc)
@@ -599,6 +459,7 @@ private:
     void OnPageChanged(wxBookCtrlEvent &event)
     {
         UpdateTitle();
+        UpdateLanguageMenuChecks();
         event.Skip();
     }
 
@@ -610,7 +471,7 @@ private:
         for (size_t i = 0; i < m_notebook->GetPageCount(); i++)
         {
             wxStyledTextCtrl *stc = PageText((int)i);
-            ApplyHighlighting(stc, m_tabData[i].filePath);
+            ApplyHighlighting(stc, EffectiveLanguage((int)i));
             UpdateMarginWidth(stc);
         }
     }
@@ -619,8 +480,25 @@ private:
     {
         int idx = event.GetId() - ID_ThemeBase;
         if (idx < 0 || idx >= (int)AllThemes().size()) return;
-        g_themeIndex = idx;
+        SetThemeIndex(idx);
         ReapplyHighlightingToAllTabs();
+    }
+
+    // Applies an explicit Language-menu choice to the current tab only,
+    // overriding extension-based detection until it's set back to
+    // Auto-Detect (or another file is opened in a fresh tab).
+    void OnSetLanguage(wxCommandEvent &event)
+    {
+        int sel = m_notebook->GetSelection();
+        if (sel == wxNOT_FOUND) return;
+
+        int idx = event.GetId() - ID_LanguageBase;
+        const std::vector<LanguageInfo> &languages = AllLanguages();
+        if (idx < 0 || idx >= (int)languages.size()) return;
+
+        m_tabData[sel].language = languages[idx].id;
+        ApplyHighlighting(PageText(sel), EffectiveLanguage(sel));
+        UpdateMarginWidth(PageText(sel));
     }
 
     void OnNewTab(wxCommandEvent &event)
@@ -670,7 +548,7 @@ private:
                 wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
             if (dlg.ShowModal() == wxID_CANCEL) return false;
             m_tabData[index].filePath = dlg.GetPath();
-            ApplyHighlighting(stc, m_tabData[index].filePath);
+            ApplyHighlighting(stc, EffectiveLanguage(index));
             UpdateMarginWidth(stc);
         }
 
@@ -752,8 +630,8 @@ private:
         wxConfigBase *cfg = wxConfigBase::Get(false);
         if (!cfg) return;
 
-        cfg->Write("Theme", (long)g_themeIndex);
-        cfg->Write("FontSize", (long)g_fontSize);
+        cfg->Write("Theme", (long)GetThemeIndex());
+        cfg->Write("FontSize", (long)GetFontSize());
 
         cfg->DeleteGroup("LastSession");
         cfg->Write("LastSession/Count", (long)openFiles.size());
@@ -903,9 +781,9 @@ private:
     // person picks is what gets saved and restored next launch.
     void ChangeFontSize(int delta)
     {
-        int newSize = g_fontSize + delta;
+        int newSize = GetFontSize() + delta;
         if (newSize < kMinFontSize || newSize > kMaxFontSize) return;
-        g_fontSize = newSize;
+        SetFontSize(newSize);
         ReapplyHighlightingToAllTabs();
     }
 
@@ -921,7 +799,7 @@ private:
 
     void OnZoomReset(wxCommandEvent &event)
     {
-        g_fontSize = kDefaultFontSize;
+        SetFontSize(kDefaultFontSize);
         ReapplyHighlightingToAllTabs();
     }
 
@@ -1142,7 +1020,7 @@ public:
             // (e.g. the other instance is stuck/unresponsive).
         }
 
-        LoadConfig(); // sets g_themeIndex + m_lastSessionFiles before any tab is created
+        LoadConfig(); // sets the theme/font size + m_lastSessionFiles before any tab is created
 
         ClearTextFrame *frame = new ClearTextFrame();
 
@@ -1199,12 +1077,12 @@ private:
         long savedTheme = 0;
         cfg->Read("Theme", &savedTheme, 0L);
         if (savedTheme >= 0 && savedTheme < (long)AllThemes().size())
-            g_themeIndex = (int)savedTheme;
+            SetThemeIndex((int)savedTheme);
 
         long savedFontSize = kDefaultFontSize;
         cfg->Read("FontSize", &savedFontSize, (long)kDefaultFontSize);
         if (savedFontSize >= kMinFontSize && savedFontSize <= kMaxFontSize)
-            g_fontSize = (int)savedFontSize;
+            SetFontSize((int)savedFontSize);
 
         long count = 0;
         cfg->Read("LastSession/Count", &count, 0L);

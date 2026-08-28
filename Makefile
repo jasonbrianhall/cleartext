@@ -6,8 +6,8 @@ CXX_LINUX = g++
 CXX_WIN   = x86_64-w64-mingw32-g++
 
 TARGET     = cleartext
-SRC        = cleartext.cpp
-HEADERS    = themes.h
+SRC        = cleartext.cpp highlighting.cpp
+HEADERS    = themes.h highlighting.h
 
 BUILD_DIR_LINUX       = build/linux
 BUILD_DIR_LINUX_DEBUG = build/linux_debug
