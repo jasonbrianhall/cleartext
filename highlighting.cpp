@@ -1,5 +1,6 @@
 #include "highlighting.h"
 #include "themes.h"
+#include "custom_themes.h"
 #include <wx/filename.h>
 
 // ----------------------------------------------------------------------
@@ -27,7 +28,10 @@ void SetFontSize(int size) { g_fontSize = size; }
 
 static const EditorTheme &CurrentTheme()
 {
-    return AllThemes()[g_themeIndex];
+    const std::vector<EditorTheme> &themes = CustomThemes::All();
+    int idx = g_themeIndex;
+    if (idx < 0 || idx >= (int)themes.size()) idx = 0; // config drift (e.g. a removed custom theme)
+    return themes[idx];
 }
 
 // ----------------------------------------------------------------------

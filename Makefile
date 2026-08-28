@@ -6,8 +6,10 @@ CXX_LINUX = g++
 CXX_WIN   = x86_64-w64-mingw32-g++
 
 TARGET     = cleartext
-SRC        = main.cpp editor_frame.cpp ipc.cpp app_config.cpp printing.cpp highlighting.cpp
-HEADERS    = themes.h highlighting.h editor_frame.h ipc.h app_config.h printing.h
+SRC        = main.cpp editor_frame.cpp ipc.cpp app_config.cpp printing.cpp highlighting.cpp \
+             custom_themes.cpp encoding.cpp find_in_files.cpp
+HEADERS    = themes.h highlighting.h editor_frame.h ipc.h app_config.h printing.h \
+             custom_themes.h encoding.h find_in_files.h
 
 BUILD_DIR_LINUX       = build/linux
 BUILD_DIR_LINUX_DEBUG = build/linux_debug

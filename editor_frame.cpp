@@ -3,10 +3,14 @@
 #include "highlighting.h"
 #include "printing.h"
 #include "app_config.h"
+#include "custom_themes.h"
+#include "encoding.h"
+#include "find_in_files.h"
 #include <wx/filename.h>
 #include <wx/print.h>
 #include <wx/aboutdlg.h>
 #include <wx/numdlg.h>
+#include <wx/dnd.h>
 
 namespace
 {
@@ -26,14 +30,37 @@ namespace
         ID_WordWrap,
         ID_ToggleFullScreen,
         ID_GoToLine,
+        ID_FindInFiles,
         ID_SaveAll,
         ID_Reload,
         ID_ShowWhitespace,
         ID_TrimTrailingWhitespace,
-        ID_ThemeBase = wxID_HIGHEST + 100,        // one radio id per entry in AllThemes()...
-        ID_LanguageBase = ID_ThemeBase + 64,      // ...then one per entry in AllLanguages()...
+        ID_ReloadCustomThemes,
+        ID_ThemeBase = wxID_HIGHEST + 100,        // one radio id per entry in CustomThemes::All()...
+        ID_LanguageBase = ID_ThemeBase + 128,     // ...then one per entry in AllLanguages()...
         ID_RecentFileBase = ID_LanguageBase + 64, // ...then one per recent-file slot...
         ID_ClearRecentFiles = ID_RecentFileBase + 32 // ...leaving room for kMaxRecentFiles entries.
+    };
+
+    // Lets the user drop files from their OS file manager anywhere on the
+    // window -- the frame background, the tab bar, or an editor's text
+    // area (each gets its own instance; see the constructor and AddTab).
+    class FileDropTarget : public wxFileDropTarget
+    {
+    public:
+        explicit FileDropTarget(ClearTextFrame *frame) : m_frame(frame) {}
+
+        bool OnDropFiles(wxCoord, wxCoord, const wxArrayString &filenames) override
+        {
+            for (const wxString &f : filenames)
+                m_frame->OpenFilePath(f);
+            if (!filenames.IsEmpty())
+                m_frame->CloseInitialBlankTabIfUnused();
+            return true;
+        }
+
+    private:
+        ClearTextFrame *m_frame;
     };
 }
 
@@ -84,6 +111,7 @@ ClearTextFrame::ClearTextFrame()
     wrapItem->Check(true);
     editMenu->AppendSeparator();
     editMenu->Append(ID_GoToLine, "Go To Line...\tCtrl+G");
+    editMenu->Append(ID_FindInFiles, "Find in Files...\tCtrl+Shift+F");
     menuBar->Append(editMenu, "&Edit");
 
     wxMenu *viewMenu = new wxMenu();
@@ -102,12 +130,8 @@ ClearTextFrame::ClearTextFrame()
     viewMenu->AppendSeparator();
 
     wxMenu *themeMenu = new wxMenu();
-    const std::vector<EditorTheme> &themes = AllThemes();
-    for (size_t i = 0; i < themes.size(); i++)
-    {
-        wxMenuItem *item = themeMenu->AppendRadioItem(ID_ThemeBase + (int)i, themes[i].name);
-        if ((int)i == GetThemeIndex()) item->Check(true);
-    }
+    m_themeMenu = themeMenu;
+    RebuildThemeMenu();
     viewMenu->AppendSubMenu(themeMenu, "Theme");
 
     // Per-tab override of ApplyHighlighting's language, regardless of
@@ -137,7 +161,22 @@ ClearTextFrame::ClearTextFrame()
     SetIcon(wxIcon("appicon"));
 #endif
 
+    // Restores the window's last position/size (see OnCloseWindow, which
+    // saves it). Applied before Show() -- main.cpp calls that after
+    // construction -- so there's no visible jump to the saved geometry.
+    AppConfig::WindowGeometry geom = AppConfig::GetWindowGeometry();
+    SetSize(geom.width, geom.height);
+    if (geom.x != -1 && geom.y != -1)
+        SetPosition(wxPoint(geom.x, geom.y));
+    if (geom.maximized)
+        Maximize(true);
+
+    // Lets files be dropped from the OS file manager anywhere on the
+    // window; each editor tab also gets its own instance (see AddTab).
+    SetDropTarget(new FileDropTarget(this));
+
     m_notebook = new wxNotebook(this, wxID_ANY);
+    m_notebook->SetDropTarget(new FileDropTarget(this));
     AddTab("Untitled");
 
     Bind(wxEVT_MENU, &ClearTextFrame::OnNewTab, this, ID_NewTab);
@@ -160,6 +199,7 @@ ClearTextFrame::ClearTextFrame()
     Bind(wxEVT_MENU, &ClearTextFrame::OnReplaceMenu, this, wxID_REPLACE);
     Bind(wxEVT_MENU, &ClearTextFrame::OnFindNext, this, ID_FindNext);
     Bind(wxEVT_MENU, &ClearTextFrame::OnGoToLine, this, ID_GoToLine);
+    Bind(wxEVT_MENU, &ClearTextFrame::OnFindInFiles, this, ID_FindInFiles);
     Bind(wxEVT_MENU, &ClearTextFrame::OnToggleWrapAround, this, ID_WrapAround);
     Bind(wxEVT_MENU, &ClearTextFrame::OnToggleWordWrap, this, ID_WordWrap);
     Bind(wxEVT_MENU, &ClearTextFrame::OnToggleShowWhitespace, this, ID_ShowWhitespace);
@@ -168,8 +208,8 @@ ClearTextFrame::ClearTextFrame()
     Bind(wxEVT_MENU, &ClearTextFrame::OnZoomOut, this, wxID_ZOOM_OUT);
     Bind(wxEVT_MENU, &ClearTextFrame::OnZoomReset, this, wxID_ZOOM_100);
     Bind(wxEVT_MENU, &ClearTextFrame::OnToggleFullScreen, this, ID_ToggleFullScreen);
-    Bind(wxEVT_MENU, &ClearTextFrame::OnSetTheme, this, ID_ThemeBase,
-         ID_ThemeBase + (int)AllThemes().size() - 1);
+    Bind(wxEVT_MENU, &ClearTextFrame::OnSetTheme, this, ID_ThemeBase, ID_LanguageBase - 1);
+    Bind(wxEVT_MENU, &ClearTextFrame::OnReloadCustomThemes, this, ID_ReloadCustomThemes);
     Bind(wxEVT_MENU, &ClearTextFrame::OnSetLanguage, this, ID_LanguageBase,
          ID_LanguageBase + (int)AllLanguages().size() - 1);
     Bind(wxEVT_MENU, &ClearTextFrame::OnOpenRecent, this, ID_RecentFileBase,
@@ -200,10 +240,7 @@ void ClearTextFrame::OpenFilePath(const wxString &path)
     }
 
     wxString content;
-    wxFile file(path);
-    if (file.IsOpened())
-        file.ReadAll(&content);
-    else
+    if (!TextEncoding::ReadFile(path, content))
     {
         wxMessageBox("Could not open file:\n" + path, "Error", wxOK | wxICON_ERROR, this);
         return;
@@ -221,6 +258,71 @@ void ClearTextFrame::CloseInitialBlankTabIfUnused()
     if (!PageText(0)->IsEmpty()) return;
 
     CloseTab(0, false);
+}
+
+// ============================================================================
+// Read-only tab access + navigation (public, used by FindInFilesDialog)
+// ============================================================================
+
+int ClearTextFrame::GetTabCount()
+{
+    return (int)m_tabData.size();
+}
+
+wxString ClearTextFrame::GetTabLabel(int index)
+{
+    return m_tabData[index].filePath.IsEmpty()
+        ? "Untitled" : wxFileName(m_tabData[index].filePath).GetFullName();
+}
+
+wxString ClearTextFrame::GetTabFilePath(int index)
+{
+    return m_tabData[index].filePath;
+}
+
+wxString ClearTextFrame::GetTabText(int index)
+{
+    return PageText(index)->GetText();
+}
+
+// Selects `index` and moves its caret to `line` (1-based). Used both for
+// jumping to an already-open tab (Find in Files) and after opening a file
+// found by name/extension elsewhere.
+void ClearTextFrame::GoToLineInTab(int index, int line)
+{
+    m_notebook->SetSelection(index);
+    wxStyledTextCtrl *stc = PageText(index);
+    stc->GotoLine(line - 1);
+    stc->EnsureCaretVisible();
+    stc->SetFocus();
+}
+
+void ClearTextFrame::GoToTabAndLine(int index, int line)
+{
+    if (index < 0 || index >= (int)m_tabData.size()) return; // tab may have closed since the match was found
+    GoToLineInTab(index, line);
+}
+
+void ClearTextFrame::OpenFilePathAndGoToLine(const wxString &path, int line)
+{
+    // If the file is already open in a tab, jump there instead of opening
+    // a second tab on the same file.
+    wxFileName target(path);
+    target.MakeAbsolute();
+    for (size_t i = 0; i < m_tabData.size(); i++)
+    {
+        if (m_tabData[i].filePath.IsEmpty()) continue;
+        wxFileName existing(m_tabData[i].filePath);
+        existing.MakeAbsolute();
+        if (existing == target)
+        {
+            GoToLineInTab((int)i, line);
+            return;
+        }
+    }
+
+    OpenFilePath(path);
+    GoToLineInTab((int)m_tabData.size() - 1, line);
 }
 
 // ============================================================================
@@ -293,6 +395,7 @@ void ClearTextFrame::AddTab(const wxString &title, const wxString &content, cons
     stc->Bind(wxEVT_MOUSEWHEEL, &ClearTextFrame::OnMouseWheel, this);
     stc->Bind(wxEVT_STC_UPDATEUI, &ClearTextFrame::OnEditorUpdateUI, this);
     stc->Bind(wxEVT_STC_MARGINCLICK, &ClearTextFrame::OnMarginClick, this);
+    stc->SetDropTarget(new FileDropTarget(this));
 
     m_notebook->AddPage(stc, title, true);
     UpdateMarginWidth(stc);
@@ -519,11 +622,41 @@ void ClearTextFrame::ReapplyHighlightingToAllTabs()
     }
 }
 
+// Clears and repopulates the Theme submenu from CustomThemes::All()
+// (built-in themes.h entries followed by any user-defined ones from the
+// config file). Called at startup and whenever that list's size can have
+// changed, i.e. after OnReloadCustomThemes.
+void ClearTextFrame::RebuildThemeMenu()
+{
+    while (m_themeMenu->GetMenuItemCount() > 0)
+        m_themeMenu->Destroy(m_themeMenu->FindItemByPosition(0));
+
+    const std::vector<EditorTheme> &themes = CustomThemes::All();
+    for (size_t i = 0; i < themes.size(); i++)
+    {
+        wxMenuItem *item = m_themeMenu->AppendRadioItem(ID_ThemeBase + (int)i, themes[i].name);
+        if ((int)i == GetThemeIndex()) item->Check(true);
+    }
+    m_themeMenu->AppendSeparator();
+    m_themeMenu->Append(ID_ReloadCustomThemes, "Reload Custom Themes");
+}
+
 void ClearTextFrame::OnSetTheme(wxCommandEvent &event)
 {
     int idx = event.GetId() - ID_ThemeBase;
-    if (idx < 0 || idx >= (int)AllThemes().size()) return;
+    if (idx < 0 || idx >= (int)CustomThemes::All().size()) return;
     SetThemeIndex(idx);
+    ReapplyHighlightingToAllTabs();
+}
+
+// Re-reads [CustomThemes] from the config file (picking up hand-edited
+// additions/changes without a restart) and rebuilds the Theme submenu to
+// match. If the previously-selected theme no longer exists, highlighting.h's
+// CurrentTheme() falls back to theme 0 on its own.
+void ClearTextFrame::OnReloadCustomThemes(wxCommandEvent &event)
+{
+    CustomThemes::Reload();
+    RebuildThemeMenu();
     ReapplyHighlightingToAllTabs();
 }
 
@@ -602,8 +735,7 @@ bool ClearTextFrame::SaveTab(int index)
     if (m_trimTrailingWhitespace)
         TrimTrailingWhitespace(stc);
 
-    wxFile file(m_tabData[index].filePath, wxFile::write);
-    if (!file.IsOpened() || !file.Write(stc->GetText()))
+    if (!TextEncoding::WriteFile(m_tabData[index].filePath, stc->GetText()))
     {
         wxMessageBox("Failed to save file.", "Error", wxOK | wxICON_ERROR, this);
         return false;
@@ -684,8 +816,7 @@ bool ClearTextFrame::ReloadTab(int index, bool force)
     }
 
     wxString content;
-    wxFile file(path);
-    if (!file.IsOpened() || !file.ReadAll(&content))
+    if (!TextEncoding::ReadFile(path, content))
     {
         wxMessageBox("Could not reload file:\n" + path, "Error", wxOK | wxICON_ERROR, this);
         return false;
@@ -753,10 +884,31 @@ void ClearTextFrame::OnCloseWindow(wxCloseEvent &event)
 
     SaveSession(openFiles);
 
+    // Keeps the saved geometry from collapsing to the maximized window's
+    // own coordinates: reuse whatever was last saved for the "restored"
+    // rect if the window is currently maximized.
+    AppConfig::WindowGeometry geom = AppConfig::GetWindowGeometry();
+    geom.maximized = IsMaximized();
+    if (!geom.maximized)
+    {
+        wxSize sz = GetSize();
+        wxPoint pos = GetPosition();
+        geom.width = sz.GetWidth();
+        geom.height = sz.GetHeight();
+        geom.x = pos.x;
+        geom.y = pos.y;
+    }
+    AppConfig::SaveWindowGeometry(geom);
+
     if (m_findReplaceDialog)
     {
         m_findReplaceDialog->Destroy();
         m_findReplaceDialog = nullptr;
+    }
+    if (m_findInFilesDialog)
+    {
+        m_findInFilesDialog->Destroy();
+        m_findInFilesDialog = nullptr;
     }
 
     Destroy();
@@ -1007,6 +1159,18 @@ void ClearTextFrame::OnGoToLine(wxCommandEvent &event)
     stc->GotoLine((int)line - 1);
     stc->EnsureCaretVisible();
     stc->SetFocus();
+}
+
+// Opens (creating it the first time) the persistent Find in Files dialog.
+// Closing it via its own window X just hides it (see FindInFilesDialog::
+// OnClose), so search text and results survive being reopened.
+void ClearTextFrame::OnFindInFiles(wxCommandEvent &event)
+{
+    if (!m_findInFilesDialog)
+        m_findInFilesDialog = new FindInFilesDialog(this);
+    m_findInFilesDialog->Show();
+    m_findInFilesDialog->Raise();
+    m_findInFilesDialog->FocusSearchField();
 }
 
 wxString ClearTextFrame::NotFoundMessage(const wxString &text)

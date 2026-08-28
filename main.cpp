@@ -5,6 +5,7 @@
 #include "app_config.h"
 #include "highlighting.h"
 #include "themes.h"
+#include "custom_themes.h"
 
 class ClearTextApp : public wxApp
 {
@@ -35,7 +36,7 @@ public:
         AppConfig::Init();
 
         int themeIndex = AppConfig::GetThemeIndex(0);
-        if (themeIndex < 0 || themeIndex >= (int)AllThemes().size()) themeIndex = 0;
+        if (themeIndex < 0 || themeIndex >= (int)CustomThemes::All().size()) themeIndex = 0;
         SetThemeIndex(themeIndex);
 
         int fontSize = AppConfig::GetFontSize(kDefaultFontSize);

@@ -8,6 +8,8 @@
 #include <vector>
 #include "highlighting.h"
 
+class FindInFilesDialog;
+
 // The main (and only) top-level window: a tabbed text editor built on
 // wxStyledTextCtrl, with menu-driven file/edit/view commands, per-tab
 // language/theme highlighting (see highlighting.h), find/replace, and
@@ -27,6 +29,14 @@ public:
     // created by the constructor -- used after opening files from argv (or
     // an IPC hand-off) so we don't leave a spare blank tab in front of them.
     void CloseInitialBlankTabIfUnused();
+
+    // --- Read-only tab access + navigation, used by FindInFilesDialog ---
+    int GetTabCount();
+    wxString GetTabLabel(int index);    // "Untitled" or the file's name
+    wxString GetTabFilePath(int index); // may be empty (unsaved tab)
+    wxString GetTabText(int index);
+    void GoToTabAndLine(int index, int line);
+    void OpenFilePathAndGoToLine(const wxString &path, int line);
 
 private:
     struct TabData
@@ -48,10 +58,12 @@ private:
     wxNotebook *m_notebook;
     wxMenu *m_languageMenu = nullptr;
     wxMenu *m_recentMenu = nullptr;
+    wxMenu *m_themeMenu = nullptr;
     std::vector<TabData> m_tabData;
     wxArrayString m_recentFiles;
     wxFindReplaceData m_findData{wxFR_DOWN};
     wxFindReplaceDialog *m_findReplaceDialog = nullptr;
+    FindInFilesDialog *m_findInFilesDialog = nullptr;
     bool m_wrapAround = true;
     bool m_showWhitespace = false;
     bool m_trimTrailingWhitespace = true;
@@ -66,6 +78,7 @@ private:
     void UpdateTitle();
     Language EffectiveLanguage(int index);
     void UpdateLanguageMenuChecks();
+    void GoToLineInTab(int index, int line);
     int IndexOf(wxStyledTextCtrl *stc);
 
     // --- Scintilla event handlers ---
@@ -82,7 +95,9 @@ private:
 
     // --- Theme / language ---
     void ReapplyHighlightingToAllTabs();
+    void RebuildThemeMenu();
     void OnSetTheme(wxCommandEvent &event);
+    void OnReloadCustomThemes(wxCommandEvent &event);
     void OnSetLanguage(wxCommandEvent &event);
 
     // --- Tab lifecycle: new / close / save / reload ---
@@ -120,13 +135,14 @@ private:
     void OnPrint(wxCommandEvent &event);
     void OnAbout(wxCommandEvent &event);
 
-    // --- Find / replace / go to line ---
+    // --- Find / replace / go to line / find in files ---
     bool FindInEditor(wxStyledTextCtrl *stc, const wxString &text, int flags, bool forward);
     void ShowFindDialog(bool replace);
     void OnFindMenu(wxCommandEvent &event);
     void OnReplaceMenu(wxCommandEvent &event);
     void OnToggleWrapAround(wxCommandEvent &event);
     void OnGoToLine(wxCommandEvent &event);
+    void OnFindInFiles(wxCommandEvent &event);
     wxString NotFoundMessage(const wxString &text);
     void OnFindNext(wxCommandEvent &event);
     void OnFindDialogEvent(wxFindDialogEvent &event);
@@ -142,3 +158,4 @@ private:
     void OnZoomReset(wxCommandEvent &event);
     void OnMouseWheel(wxMouseEvent &event);
 };
+
