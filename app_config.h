@@ -6,7 +6,7 @@
 #include "themes.h"
 
 // Centralizes every read/write of ClearText's on-disk settings file
-// (~/.config/ClearText/cleartext.conf on Linux, %APPDATA%\ClearText\cleartext.conf
+// (~/.ClearText/cleartext.conf on Linux, %APPDATA%\ClearText\cleartext.conf
 // on Windows) behind a small typed API, so key names and defaults live in
 // exactly one place instead of being scattered across the app.
 namespace AppConfig

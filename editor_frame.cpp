@@ -6,11 +6,15 @@
 #include "custom_themes.h"
 #include "encoding.h"
 #include "find_in_files.h"
+#include "theme_editor.h"
+#include "copy_html.h"
 #include <wx/filename.h>
 #include <wx/print.h>
 #include <wx/aboutdlg.h>
 #include <wx/numdlg.h>
 #include <wx/dnd.h>
+#include <wx/clipbrd.h>
+#include <wx/dataobj.h>
 
 namespace
 {
@@ -35,7 +39,10 @@ namespace
         ID_Reload,
         ID_ShowWhitespace,
         ID_TrimTrailingWhitespace,
-        ID_ReloadCustomThemes,
+        ID_CopyAsHtml,
+        ID_NewTheme,
+        ID_EditTheme,
+        ID_DeleteTheme,
         ID_ThemeBase = wxID_HIGHEST + 100,        // one radio id per entry in CustomThemes::All()...
         ID_LanguageBase = ID_ThemeBase + 128,     // ...then one per entry in AllLanguages()...
         ID_RecentFileBase = ID_LanguageBase + 64, // ...then one per recent-file slot...
@@ -100,6 +107,7 @@ ClearTextFrame::ClearTextFrame()
     editMenu->AppendSeparator();
     editMenu->Append(wxID_CUT, "Cut\tCtrl+X");
     editMenu->Append(wxID_COPY, "Copy\tCtrl+C");
+    editMenu->Append(ID_CopyAsHtml, "Copy as HTML");
     editMenu->Append(wxID_PASTE, "Paste\tCtrl+V");
     editMenu->AppendSeparator();
     editMenu->Append(wxID_SELECTALL, "Select All\tCtrl+A");
@@ -193,6 +201,7 @@ ClearTextFrame::ClearTextFrame()
     Bind(wxEVT_MENU, &ClearTextFrame::OnRedo, this, wxID_REDO);
     Bind(wxEVT_MENU, &ClearTextFrame::OnCut, this, wxID_CUT);
     Bind(wxEVT_MENU, &ClearTextFrame::OnCopy, this, wxID_COPY);
+    Bind(wxEVT_MENU, &ClearTextFrame::OnCopyAsHtml, this, ID_CopyAsHtml);
     Bind(wxEVT_MENU, &ClearTextFrame::OnPaste, this, wxID_PASTE);
     Bind(wxEVT_MENU, &ClearTextFrame::OnSelectAll, this, wxID_SELECTALL);
     Bind(wxEVT_MENU, &ClearTextFrame::OnPrint, this, wxID_PRINT);
@@ -211,7 +220,9 @@ ClearTextFrame::ClearTextFrame()
     Bind(wxEVT_MENU, &ClearTextFrame::OnZoomReset, this, wxID_ZOOM_100);
     Bind(wxEVT_MENU, &ClearTextFrame::OnToggleFullScreen, this, ID_ToggleFullScreen);
     Bind(wxEVT_MENU, &ClearTextFrame::OnSetTheme, this, ID_ThemeBase, ID_LanguageBase - 1);
-    Bind(wxEVT_MENU, &ClearTextFrame::OnReloadCustomThemes, this, ID_ReloadCustomThemes);
+    Bind(wxEVT_MENU, &ClearTextFrame::OnNewTheme, this, ID_NewTheme);
+    Bind(wxEVT_MENU, &ClearTextFrame::OnEditTheme, this, ID_EditTheme);
+    Bind(wxEVT_MENU, &ClearTextFrame::OnDeleteTheme, this, ID_DeleteTheme);
     Bind(wxEVT_MENU, &ClearTextFrame::OnSetLanguage, this, ID_LanguageBase,
          ID_LanguageBase + (int)AllLanguages().size() - 1);
     Bind(wxEVT_MENU, &ClearTextFrame::OnOpenRecent, this, ID_RecentFileBase,
@@ -365,6 +376,11 @@ void ClearTextFrame::SetupEditor(wxStyledTextCtrl *stc)
     stc->SetUseTabs(false);
     stc->SetWrapMode(wxSTC_WRAP_WORD);
     stc->SetViewWhiteSpace(m_showWhitespace ? wxSTC_WS_VISIBLEALWAYS : wxSTC_WS_INVISIBLE);
+
+    // Scintilla's own built-in right-click menu doesn't know about our
+    // commands (Copy as HTML, etc.) and can't be extended, so it's
+    // replaced with a real wx menu -- see OnEditorContextMenu.
+    stc->UsePopUp(wxSTC_POPUP_NEVER);
 }
 
 // Grows the line-number margin as the document gains more digits
@@ -398,6 +414,7 @@ void ClearTextFrame::AddTab(const wxString &title, const wxString &content, cons
     stc->Bind(wxEVT_MOUSEWHEEL, &ClearTextFrame::OnMouseWheel, this);
     stc->Bind(wxEVT_STC_UPDATEUI, &ClearTextFrame::OnEditorUpdateUI, this);
     stc->Bind(wxEVT_STC_MARGINCLICK, &ClearTextFrame::OnMarginClick, this);
+    stc->Bind(wxEVT_CONTEXT_MENU, &ClearTextFrame::OnEditorContextMenu, this);
     stc->SetDropTarget(new FileDropTarget(this));
 
     m_notebook->AddPage(stc, title, true);
@@ -560,6 +577,45 @@ void ClearTextFrame::OnMarginClick(wxStyledTextEvent &event)
     stc->ToggleFold(stc->LineFromPosition(event.GetPosition()));
 }
 
+// Right-click (or the keyboard Menu key) context menu for the editor.
+// Reuses the same command ids as the Edit menu -- wxEVT_MENU from a popup
+// shown on a child window propagates up to the frame's own Bind()s, so no
+// separate handlers are needed here.
+void ClearTextFrame::OnEditorContextMenu(wxContextMenuEvent &event)
+{
+    wxStyledTextCtrl *stc = (wxStyledTextCtrl*)event.GetEventObject();
+    if (!stc) return;
+
+    bool hasSelection = stc->GetSelectionStart() != stc->GetSelectionEnd();
+
+    wxMenu menu;
+    menu.Append(wxID_UNDO, "Undo\tCtrl+Z");
+    menu.Append(wxID_REDO, "Redo\tCtrl+Y");
+    menu.AppendSeparator();
+    menu.Append(wxID_CUT, "Cut\tCtrl+X");
+    menu.Append(wxID_COPY, "Copy\tCtrl+C");
+    menu.Append(ID_CopyAsHtml, "Copy as HTML");
+    menu.Append(wxID_PASTE, "Paste\tCtrl+V");
+    menu.AppendSeparator();
+    menu.Append(wxID_SELECTALL, "Select All\tCtrl+A");
+
+    menu.Enable(wxID_UNDO, stc->CanUndo());
+    menu.Enable(wxID_REDO, stc->CanRedo());
+    menu.Enable(wxID_CUT, hasSelection);
+    menu.Enable(wxID_COPY, hasSelection);
+    menu.Enable(wxID_PASTE, stc->CanPaste());
+
+    // A keyboard-invoked context menu (the Menu key, Shift+F10) reports no
+    // position; fall back to the middle of the visible area instead of a
+    // menu with no location at all.
+    wxPoint screenPos = event.GetPosition();
+    wxPoint clientPos = (screenPos == wxDefaultPosition)
+        ? wxPoint(stc->GetClientSize().GetWidth() / 2, stc->GetClientSize().GetHeight() / 2)
+        : stc->ScreenToClient(screenPos);
+
+    stc->PopupMenu(&menu, clientPos);
+}
+
 void ClearTextFrame::OnPageChanged(wxAuiNotebookEvent &event)
 {
     UpdateTitle();
@@ -637,9 +693,9 @@ void ClearTextFrame::ReapplyHighlightingToAllTabs()
 }
 
 // Clears and repopulates the Theme submenu from CustomThemes::All()
-// (built-in themes.h entries followed by any user-defined ones from the
-// config file). Called at startup and whenever that list's size can have
-// changed, i.e. after OnReloadCustomThemes.
+// (built-in themes.h entries followed by any user-defined ones). Called at
+// startup and whenever that list's size can have changed, i.e. after
+// creating or deleting a custom theme.
 void ClearTextFrame::RebuildThemeMenu()
 {
     while (m_themeMenu->GetMenuItemCount() > 0)
@@ -652,7 +708,20 @@ void ClearTextFrame::RebuildThemeMenu()
         if ((int)i == GetThemeIndex()) item->Check(true);
     }
     m_themeMenu->AppendSeparator();
-    m_themeMenu->Append(ID_ReloadCustomThemes, "Reload Custom Themes");
+    m_themeMenu->Append(ID_NewTheme, "New Theme...");
+    m_themeMenu->Append(ID_EditTheme, "Edit Theme...");
+    m_themeMenu->Append(ID_DeleteTheme, "Delete Theme");
+    UpdateThemeActionStates();
+}
+
+// Edit/Delete only make sense for a custom (user-created) theme -- the
+// compiled-in ones from themes.h aren't editable. Called after
+// RebuildThemeMenu and whenever the active theme selection changes.
+void ClearTextFrame::UpdateThemeActionStates()
+{
+    bool isCustom = CustomThemes::IsCustom((size_t)GetThemeIndex());
+    if (wxMenuItem *item = m_themeMenu->FindItem(ID_EditTheme)) item->Enable(isCustom);
+    if (wxMenuItem *item = m_themeMenu->FindItem(ID_DeleteTheme)) item->Enable(isCustom);
 }
 
 void ClearTextFrame::OnSetTheme(wxCommandEvent &event)
@@ -661,15 +730,58 @@ void ClearTextFrame::OnSetTheme(wxCommandEvent &event)
     if (idx < 0 || idx >= (int)CustomThemes::All().size()) return;
     SetThemeIndex(idx);
     ReapplyHighlightingToAllTabs();
+    UpdateThemeActionStates();
 }
 
-// Re-reads [CustomThemes] from the config file (picking up hand-edited
-// additions/changes without a restart) and rebuilds the Theme submenu to
-// match. If the previously-selected theme no longer exists, highlighting.h's
-// CurrentTheme() falls back to theme 0 on its own.
-void ClearTextFrame::OnReloadCustomThemes(wxCommandEvent &event)
+// Opens the theme editor seeded with the currently active theme's colors
+// (name cleared, since this creates a new theme) and, on Save, adds and
+// switches to the result.
+void ClearTextFrame::OnNewTheme(wxCommandEvent &event)
 {
-    CustomThemes::Reload();
+    EditorTheme seed = CustomThemes::All()[GetThemeIndex()];
+    seed.name = "";
+
+    ThemeEditorDialog dlg(this, "New Theme", seed);
+    if (dlg.ShowModal() != wxID_OK) return;
+
+    size_t idx = CustomThemes::Add(dlg.GetTheme());
+    SetThemeIndex((int)idx);
+    RebuildThemeMenu();
+    ReapplyHighlightingToAllTabs();
+}
+
+// Opens the theme editor seeded with the exact colors (and name) of the
+// currently active custom theme, and saves changes back in place on Save.
+// Only reachable when the active theme is custom -- see
+// UpdateThemeActionStates.
+void ClearTextFrame::OnEditTheme(wxCommandEvent &event)
+{
+    int idx = GetThemeIndex();
+    if (!CustomThemes::IsCustom((size_t)idx)) return;
+
+    ThemeEditorDialog dlg(this, "Edit Theme", CustomThemes::All()[idx]);
+    if (dlg.ShowModal() != wxID_OK) return;
+
+    CustomThemes::Update((size_t)idx, dlg.GetTheme());
+    RebuildThemeMenu();
+    ReapplyHighlightingToAllTabs();
+}
+
+// Deletes the currently active custom theme after confirming, falling back
+// to theme 0. Only reachable when the active theme is custom -- see
+// UpdateThemeActionStates.
+void ClearTextFrame::OnDeleteTheme(wxCommandEvent &event)
+{
+    int idx = GetThemeIndex();
+    if (!CustomThemes::IsCustom((size_t)idx)) return;
+
+    wxString name = CustomThemes::All()[idx].name;
+    int result = wxMessageBox("Delete theme \"" + name + "\"?", "Delete Theme",
+        wxYES_NO | wxICON_WARNING, this);
+    if (result != wxYES) return;
+
+    CustomThemes::Remove((size_t)idx);
+    SetThemeIndex(0);
     RebuildThemeMenu();
     ReapplyHighlightingToAllTabs();
 }
@@ -1030,6 +1142,31 @@ void ClearTextFrame::OnUndo(wxCommandEvent &event) { if (auto *t = CurrentText()
 void ClearTextFrame::OnRedo(wxCommandEvent &event) { if (auto *t = CurrentText()) t->Redo(); }
 void ClearTextFrame::OnCut(wxCommandEvent &event) { if (auto *t = CurrentText()) t->Cut(); }
 void ClearTextFrame::OnCopy(wxCommandEvent &event) { if (auto *t = CurrentText()) t->Copy(); }
+
+// Copies the selection (or, with none, the whole document) to the
+// clipboard as HTML, preserving exactly what's on screen -- theme colors,
+// background, bold/italic -- by reading Scintilla's own resolved styles
+// (see copy_html.h). A plain-text fallback rides along in the same
+// clipboard entry for paste targets that don't understand HTML.
+void ClearTextFrame::OnCopyAsHtml(wxCommandEvent &event)
+{
+    wxStyledTextCtrl *stc = CurrentText();
+    if (!stc) return;
+
+    bool hasSelection = stc->GetSelectionStart() != stc->GetSelectionEnd();
+    wxString plainText = hasSelection ? stc->GetSelectedText() : stc->GetText();
+    if (plainText.IsEmpty()) return;
+
+    wxString html = BuildHtmlFromStc(stc);
+
+    if (!wxTheClipboard->Open()) return;
+    wxDataObjectComposite *composite = new wxDataObjectComposite();
+    composite->Add(new wxHTMLDataObject(html), true); // preferred format
+    composite->Add(new wxTextDataObject(plainText));
+    wxTheClipboard->SetData(composite);
+    wxTheClipboard->Close();
+}
+
 void ClearTextFrame::OnPaste(wxCommandEvent &event) { if (auto *t = CurrentText()) t->Paste(); }
 void ClearTextFrame::OnSelectAll(wxCommandEvent &event) { if (auto *t = CurrentText()) t->SelectAll(); }
 

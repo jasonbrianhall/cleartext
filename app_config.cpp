@@ -9,10 +9,22 @@ namespace
     // A single file-backed config rather than wx's default wxConfig
     // backend, so behavior -- and the on-disk format -- matches on both
     // platforms instead of Windows silently using the registry.
+    //
+    // wxStandardPaths::GetUserConfigDir() resolves to the home directory
+    // itself on Unix (verified against wx 3.2's actual behavior -- it does
+    // NOT follow XDG_CONFIG_HOME/~/.config) and to %APPDATA% on Windows.
+    // Linux gets an explicit dotfile directory off of that; Windows keeps
+    // its own undotted "ClearText" under Roaming AppData, matching the
+    // convention apps there already use.
     wxString ConfigFilePath()
     {
+#ifdef WIN32
         wxString dir = wxStandardPaths::Get().GetUserConfigDir() +
             wxFileName::GetPathSeparator() + "ClearText";
+#else
+        wxString dir = wxStandardPaths::Get().GetUserConfigDir() +
+            wxFileName::GetPathSeparator() + ".ClearText";
+#endif
         if (!wxDirExists(dir))
             wxFileName::Mkdir(dir, wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL);
         return dir + wxFileName::GetPathSeparator() + "cleartext.conf";

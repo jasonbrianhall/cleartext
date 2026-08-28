@@ -89,6 +89,7 @@ private:
     void UpdateBraceHighlight(wxStyledTextCtrl *stc);
     void UpdateStatusBarPosition(wxStyledTextCtrl *stc);
     void OnMarginClick(wxStyledTextEvent &event);
+    void OnEditorContextMenu(wxContextMenuEvent &event);
     void OnPageChanged(wxAuiNotebookEvent &event);
     void OnPageClose(wxAuiNotebookEvent &event);
     void OnActivate(wxActivateEvent &event);
@@ -97,8 +98,11 @@ private:
     // --- Theme / language ---
     void ReapplyHighlightingToAllTabs();
     void RebuildThemeMenu();
+    void UpdateThemeActionStates();
     void OnSetTheme(wxCommandEvent &event);
-    void OnReloadCustomThemes(wxCommandEvent &event);
+    void OnNewTheme(wxCommandEvent &event);
+    void OnEditTheme(wxCommandEvent &event);
+    void OnDeleteTheme(wxCommandEvent &event);
     void OnSetLanguage(wxCommandEvent &event);
 
     // --- Tab lifecycle: new / close / save / reload ---
@@ -130,6 +134,7 @@ private:
     void OnRedo(wxCommandEvent &event);
     void OnCut(wxCommandEvent &event);
     void OnCopy(wxCommandEvent &event);
+    void OnCopyAsHtml(wxCommandEvent &event);
     void OnPaste(wxCommandEvent &event);
     void OnSelectAll(wxCommandEvent &event);
 

@@ -7,9 +7,9 @@ CXX_WIN   = x86_64-w64-mingw32-g++
 
 TARGET     = cleartext
 SRC        = main.cpp editor_frame.cpp ipc.cpp app_config.cpp printing.cpp highlighting.cpp \
-             custom_themes.cpp encoding.cpp find_in_files.cpp
+             custom_themes.cpp encoding.cpp find_in_files.cpp theme_editor.cpp copy_html.cpp
 HEADERS    = themes.h highlighting.h editor_frame.h ipc.h app_config.h printing.h \
-             custom_themes.h encoding.h find_in_files.h
+             custom_themes.h encoding.h find_in_files.h theme_editor.h copy_html.h
 
 BUILD_DIR_LINUX       = build/linux
 BUILD_DIR_LINUX_DEBUG = build/linux_debug
@@ -24,8 +24,8 @@ CXXFLAGS_COMMON = -Wall -Wextra -std=c++17
 # ============================================================================
 # LINUX (native wx-config)
 # ============================================================================
-WX_CFLAGS_LINUX := $(shell wx-config --cxxflags std,stc,net,adv)
-WX_LIBS_LINUX   := $(shell wx-config --libs std,stc,net,adv)
+WX_CFLAGS_LINUX := $(shell wx-config --cxxflags std,stc,net,adv,aui)
+WX_LIBS_LINUX   := $(shell wx-config --libs std,stc,net,adv,aui)
 
 CXXFLAGS_LINUX = $(CXXFLAGS_COMMON) -O2 $(WX_CFLAGS_LINUX)
 LDFLAGS_LINUX  = $(WX_LIBS_LINUX)
@@ -45,6 +45,7 @@ WX_CFLAGS_WIN := -I/usr/x86_64-w64-mingw32/sys-root/mingw/include/wx-3.0 \
 
 WX_LIBS_WIN   := -L/usr/x86_64-w64-mingw32/sys-root/mingw/lib \
                   -lwx_mswu_stc-3.0-x86_64-w64-mingw32 \
+                  -lwx_mswu_aui-3.0-x86_64-w64-mingw32 \
                   -lwx_mswu_adv-3.0-x86_64-w64-mingw32 \
                   -lwx_mswu_core-3.0-x86_64-w64-mingw32 \
                   -lwx_baseu_net-3.0-x86_64-w64-mingw32 \
