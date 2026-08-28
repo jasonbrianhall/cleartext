@@ -175,7 +175,9 @@ ClearTextFrame::ClearTextFrame()
     // window; each editor tab also gets its own instance (see AddTab).
     SetDropTarget(new FileDropTarget(this));
 
-    m_notebook = new wxNotebook(this, wxID_ANY);
+    m_notebook = new wxAuiNotebook(this, wxID_ANY, wxDefaultPosition, wxDefaultSize,
+        wxAUI_NB_TOP | wxAUI_NB_TAB_SPLIT | wxAUI_NB_TAB_MOVE | wxAUI_NB_SCROLL_BUTTONS |
+        wxAUI_NB_CLOSE_ON_ALL_TABS | wxAUI_NB_MIDDLE_CLICK_CLOSE | wxAUI_NB_WINDOWLIST_BUTTON);
     m_notebook->SetDropTarget(new FileDropTarget(this));
     AddTab("Untitled");
 
@@ -220,7 +222,8 @@ ClearTextFrame::ClearTextFrame()
     Bind(wxEVT_FIND_REPLACE, &ClearTextFrame::OnFindDialogEvent, this);
     Bind(wxEVT_FIND_REPLACE_ALL, &ClearTextFrame::OnFindDialogEvent, this);
     Bind(wxEVT_FIND_CLOSE, &ClearTextFrame::OnFindDialogEvent, this);
-    Bind(wxEVT_NOTEBOOK_PAGE_CHANGED, &ClearTextFrame::OnPageChanged, this);
+    Bind(wxEVT_AUINOTEBOOK_PAGE_CHANGED, &ClearTextFrame::OnPageChanged, this);
+    Bind(wxEVT_AUINOTEBOOK_PAGE_CLOSE, &ClearTextFrame::OnPageClose, this);
     Bind(wxEVT_CLOSE_WINDOW, &ClearTextFrame::OnCloseWindow, this);
     Bind(wxEVT_ACTIVATE, &ClearTextFrame::OnActivate, this);
 }
@@ -557,7 +560,7 @@ void ClearTextFrame::OnMarginClick(wxStyledTextEvent &event)
     stc->ToggleFold(stc->LineFromPosition(event.GetPosition()));
 }
 
-void ClearTextFrame::OnPageChanged(wxBookCtrlEvent &event)
+void ClearTextFrame::OnPageChanged(wxAuiNotebookEvent &event)
 {
     UpdateTitle();
     UpdateLanguageMenuChecks();
@@ -569,6 +572,17 @@ void ClearTextFrame::OnPageChanged(wxBookCtrlEvent &event)
         UpdateStatusBarPosition(PageText(sel));
     }
     event.Skip();
+}
+
+// wxAuiNotebook's own close button (and middle-click) would otherwise
+// close the tab itself, bypassing the unsaved-changes prompt and leaving
+// m_tabData out of sync with the notebook. Veto its default handling and
+// route through CloseTab instead, so the X behaves exactly like Ctrl+W /
+// File > Close Tab.
+void ClearTextFrame::OnPageClose(wxAuiNotebookEvent &event)
+{
+    event.Veto();
+    CloseTab(event.GetSelection());
 }
 
 // When the window regains focus, re-check the active tab for changes

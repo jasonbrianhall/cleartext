@@ -1,7 +1,7 @@
 #pragma once
 
 #include <wx/wx.h>
-#include <wx/notebook.h>
+#include <wx/aui/auibook.h>
 #include <wx/stc/stc.h>
 #include <wx/fdrepdlg.h>
 #include <wx/datetime.h>
@@ -55,7 +55,7 @@ private:
 
     static const size_t kMaxRecentFiles = 10;
 
-    wxNotebook *m_notebook;
+    wxAuiNotebook *m_notebook;
     wxMenu *m_languageMenu = nullptr;
     wxMenu *m_recentMenu = nullptr;
     wxMenu *m_themeMenu = nullptr;
@@ -89,7 +89,8 @@ private:
     void UpdateBraceHighlight(wxStyledTextCtrl *stc);
     void UpdateStatusBarPosition(wxStyledTextCtrl *stc);
     void OnMarginClick(wxStyledTextEvent &event);
-    void OnPageChanged(wxBookCtrlEvent &event);
+    void OnPageChanged(wxAuiNotebookEvent &event);
+    void OnPageClose(wxAuiNotebookEvent &event);
     void OnActivate(wxActivateEvent &event);
     void CheckExternalModification(int index);
 
