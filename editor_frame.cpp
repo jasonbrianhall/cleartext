@@ -187,6 +187,12 @@ ClearTextFrame::ClearTextFrame()
         wxAUI_NB_TOP | wxAUI_NB_TAB_SPLIT | wxAUI_NB_TAB_MOVE | wxAUI_NB_SCROLL_BUTTONS |
         wxAUI_NB_CLOSE_ON_ALL_TABS | wxAUI_NB_MIDDLE_CLICK_CLOSE | wxAUI_NB_WINDOWLIST_BUTTON);
     m_notebook->SetDropTarget(new FileDropTarget(this));
+    // A pinned, non-editor "+" tab that's always last -- selecting it (via
+    // OnPageChanged) opens a new tab in its place instead of actually
+    // switching to it. Created before the first AddTab() call so AddTab's
+    // insert-before-last logic applies uniformly, including to the very
+    // first "Untitled" tab.
+    m_notebook->AddPage(new wxPanel(m_notebook), "+", false);
     AddTab("Untitled");
 
     Bind(wxEVT_MENU, &ClearTextFrame::OnNewTab, this, ID_NewTab);
@@ -235,6 +241,7 @@ ClearTextFrame::ClearTextFrame()
     Bind(wxEVT_FIND_CLOSE, &ClearTextFrame::OnFindDialogEvent, this);
     Bind(wxEVT_AUINOTEBOOK_PAGE_CHANGED, &ClearTextFrame::OnPageChanged, this);
     Bind(wxEVT_AUINOTEBOOK_PAGE_CLOSE, &ClearTextFrame::OnPageClose, this);
+    Bind(wxEVT_AUINOTEBOOK_BEGIN_DRAG, &ClearTextFrame::OnPageBeginDrag, this);
     Bind(wxEVT_CLOSE_WINDOW, &ClearTextFrame::OnCloseWindow, this);
     Bind(wxEVT_ACTIVATE, &ClearTextFrame::OnActivate, this);
 }
@@ -266,7 +273,7 @@ void ClearTextFrame::OpenFilePath(const wxString &path)
 
 void ClearTextFrame::CloseInitialBlankTabIfUnused()
 {
-    if (m_notebook->GetPageCount() < 2) return;
+    if (m_tabData.size() < 2) return;
     if (!m_tabData[0].filePath.IsEmpty()) return;
     if (m_tabData[0].modified) return;
     if (!PageText(0)->IsEmpty()) return;
@@ -417,9 +424,14 @@ void ClearTextFrame::AddTab(const wxString &title, const wxString &content, cons
     stc->Bind(wxEVT_CONTEXT_MENU, &ClearTextFrame::OnEditorContextMenu, this);
     stc->SetDropTarget(new FileDropTarget(this));
 
-    m_notebook->AddPage(stc, title, true);
+    m_notebook->InsertPage(m_tabData.size() - 1, stc, title, true);
     UpdateMarginWidth(stc);
     UpdateTitle();
+}
+
+bool ClearTextFrame::IsAddTabPage(int index)
+{
+    return dynamic_cast<wxStyledTextCtrl*>(m_notebook->GetPage(index)) == nullptr;
 }
 
 void ClearTextFrame::UpdateTabLabel(int index)
@@ -618,16 +630,37 @@ void ClearTextFrame::OnEditorContextMenu(wxContextMenuEvent &event)
 
 void ClearTextFrame::OnPageChanged(wxAuiNotebookEvent &event)
 {
+    int sel = m_notebook->GetSelection();
+
+    // Selecting the pinned "+" tab means "open a new tab", not "switch to
+    // this page" -- AddTab() inserts the new tab right before it and
+    // selects that instead, which fires a nested PAGE_CHANGED that this
+    // same handler processes normally, so we just bail out of this one.
+    if (sel != wxNOT_FOUND && IsAddTabPage(sel))
+    {
+        AddTab("Untitled");
+        return;
+    }
+
     UpdateTitle();
     UpdateLanguageMenuChecks();
 
-    int sel = m_notebook->GetSelection();
     if (sel != wxNOT_FOUND)
     {
         CheckExternalModification(sel);
         UpdateStatusBarPosition(PageText(sel));
     }
     event.Skip();
+}
+
+// Keeps the pinned "+" tab from being dragged, reordered, or split into
+// its own pane -- it's a fixed control, not an editor tab.
+void ClearTextFrame::OnPageBeginDrag(wxAuiNotebookEvent &event)
+{
+    if (IsAddTabPage(m_notebook->GetSelection()))
+        event.Veto();
+    else
+        event.Skip();
 }
 
 // wxAuiNotebook's own close button (and middle-click) would otherwise
@@ -638,6 +671,7 @@ void ClearTextFrame::OnPageChanged(wxAuiNotebookEvent &event)
 void ClearTextFrame::OnPageClose(wxAuiNotebookEvent &event)
 {
     event.Veto();
+    if (IsAddTabPage(event.GetSelection())) return;
     CloseTab(event.GetSelection());
 }
 
@@ -684,7 +718,7 @@ void ClearTextFrame::CheckExternalModification(int index)
 // change rather than something each tab tracks separately.
 void ClearTextFrame::ReapplyHighlightingToAllTabs()
 {
-    for (size_t i = 0; i < m_notebook->GetPageCount(); i++)
+    for (size_t i = 0; i < m_tabData.size(); i++)
     {
         wxStyledTextCtrl *stc = PageText((int)i);
         ApplyHighlighting(stc, EffectiveLanguage((int)i));
@@ -837,7 +871,7 @@ bool ClearTextFrame::CloseTab(int index, bool addNewIfEmpty)
     m_notebook->DeletePage(index);
     m_tabData.erase(m_tabData.begin() + index);
 
-    if (addNewIfEmpty && m_notebook->GetPageCount() == 0)
+    if (addNewIfEmpty && m_tabData.empty())
         AddTab("Untitled");
 
     UpdateTitle();
@@ -999,7 +1033,7 @@ void ClearTextFrame::OnCloseWindow(wxCloseEvent &event)
         if (!tab.filePath.IsEmpty())
             openFiles.Add(tab.filePath);
 
-    while (m_notebook->GetPageCount() > 0)
+    while (!m_tabData.empty())
     {
         if (!CloseTab(0, false)) // don't re-add "Untitled" while shutting down
         {
@@ -1427,7 +1461,7 @@ void ClearTextFrame::OnFindDialogEvent(wxFindDialogEvent &event)
 void ClearTextFrame::OnToggleWordWrap(wxCommandEvent &event)
 {
     int mode = event.IsChecked() ? wxSTC_WRAP_WORD : wxSTC_WRAP_NONE;
-    for (size_t i = 0; i < m_notebook->GetPageCount(); i++)
+    for (size_t i = 0; i < m_tabData.size(); i++)
         PageText((int)i)->SetWrapMode(mode);
 }
 
@@ -1435,7 +1469,7 @@ void ClearTextFrame::OnToggleShowWhitespace(wxCommandEvent &event)
 {
     m_showWhitespace = event.IsChecked();
     int mode = m_showWhitespace ? wxSTC_WS_VISIBLEALWAYS : wxSTC_WS_INVISIBLE;
-    for (size_t i = 0; i < m_notebook->GetPageCount(); i++)
+    for (size_t i = 0; i < m_tabData.size(); i++)
         PageText((int)i)->SetViewWhiteSpace(mode);
 }
 

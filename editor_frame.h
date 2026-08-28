@@ -92,6 +92,11 @@ private:
     void OnEditorContextMenu(wxContextMenuEvent &event);
     void OnPageChanged(wxAuiNotebookEvent &event);
     void OnPageClose(wxAuiNotebookEvent &event);
+    void OnPageBeginDrag(wxAuiNotebookEvent &event);
+    // True if the notebook page at `index` is the pinned "+" tab (an empty
+    // panel) rather than a real editor tab (a wxStyledTextCtrl) -- see
+    // AddTab, which always keeps it last.
+    bool IsAddTabPage(int index);
     void OnActivate(wxActivateEvent &event);
     void CheckExternalModification(int index);
 
