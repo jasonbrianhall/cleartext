@@ -7,6 +7,7 @@
 #include <wx/datetime.h>
 #include <vector>
 #include "highlighting.h"
+#include "encoding.h"
 
 class FindInFilesDialog;
 
@@ -47,6 +48,15 @@ private:
         // default); any other value is a user override from the Language
         // menu that ignores the extension until changed back to Auto.
         Language language = Language::Auto;
+        // TextEncoding::Encoding::Auto means "use whatever ReadFile()
+        // detected at load time" (see detectedEncoding, below); any other
+        // value is a user override from the View > Encoding menu, picked
+        // when the auto-detected guess came out wrong.
+        TextEncoding::Encoding encoding = TextEncoding::Encoding::Auto;
+        // What this tab's content was actually decoded as -- either
+        // ReadFile()'s BOM/UTF-8-validity guess, or the explicit choice
+        // once overridden. Utf8 for a new/never-loaded ("Untitled") tab.
+        TextEncoding::Encoding detectedEncoding = TextEncoding::Encoding::Utf8;
         // The file's on-disk modification time as of the last open/save/
         // reload. Invalid (default-constructed) means "not tracked" -- an
         // unsaved-only tab, or one that hasn't been touched yet.
@@ -59,6 +69,7 @@ private:
     wxMenu *m_languageMenu = nullptr;
     wxMenu *m_recentMenu = nullptr;
     wxMenu *m_themeMenu = nullptr;
+    wxMenu *m_encodingMenu = nullptr;
     std::vector<TabData> m_tabData;
     wxArrayString m_recentFiles;
     wxFindReplaceData m_findData{wxFR_DOWN};
@@ -67,17 +78,30 @@ private:
     bool m_wrapAround = true;
     bool m_showWhitespace = false;
     bool m_trimTrailingWhitespace = true;
+    // True only while CloseTab() is removing a page. DeletePage() can
+    // synchronously select another page -- including the pinned "+" tab,
+    // if the one being closed was the last real tab -- and fire
+    // PAGE_CHANGED; this tells OnPageChanged not to react to that itself,
+    // since CloseTab's own addNewIfEmpty logic is the single place that
+    // decides whether a fresh "Untitled" tab is warranted.
+    bool m_closingTab = false;
 
     // --- Tab / editor-control plumbing ---
     wxStyledTextCtrl *CurrentText();
     wxStyledTextCtrl *PageText(int index);
     void SetupEditor(wxStyledTextCtrl *stc);
     void UpdateMarginWidth(wxStyledTextCtrl *stc);
-    void AddTab(const wxString &title, const wxString &content = "", const wxString &filePath = "");
+    void AddTab(const wxString &title, const wxString &content = "", const wxString &filePath = "",
+                TextEncoding::Encoding detectedEncoding = TextEncoding::Encoding::Utf8);
     void UpdateTabLabel(int index);
     void UpdateTitle();
     Language EffectiveLanguage(int index);
     void UpdateLanguageMenuChecks();
+    // The encoding actually in effect for this tab: its override if one's
+    // been set via View > Encoding, otherwise whatever was auto-detected
+    // at load time (see TabData::detectedEncoding).
+    TextEncoding::Encoding EffectiveEncoding(int index);
+    void UpdateEncodingMenuChecks();
     void GoToLineInTab(int index, int line);
     int IndexOf(wxStyledTextCtrl *stc);
 
@@ -109,6 +133,7 @@ private:
     void OnEditTheme(wxCommandEvent &event);
     void OnDeleteTheme(wxCommandEvent &event);
     void OnSetLanguage(wxCommandEvent &event);
+    void OnSetEncoding(wxCommandEvent &event);
 
     // --- Tab lifecycle: new / close / save / reload ---
     void OnNewTab(wxCommandEvent &event);
@@ -119,6 +144,12 @@ private:
     void OnSaveAll(wxCommandEvent &event);
     void OnReload(wxCommandEvent &event);
     bool ReloadTab(int index, bool force);
+    // Shared by ReloadTab (reload preserving the tab's current encoding
+    // choice) and OnSetEncoding (reload re-decoding as a newly-picked
+    // encoding). Re-reads `index`'s file from disk as `encoding` (Auto
+    // means re-detect), discarding any in-editor changes; with `force`
+    // false and the tab modified, confirms with the user first.
+    bool ReloadTabAs(int index, TextEncoding::Encoding encoding, bool force);
     void OnOpen(wxCommandEvent &event);
     void OnSave(wxCommandEvent &event);
     void OnSaveAs(wxCommandEvent &event);

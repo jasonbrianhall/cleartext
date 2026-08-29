@@ -46,7 +46,8 @@ namespace
         ID_ThemeBase = wxID_HIGHEST + 100,        // one radio id per entry in CustomThemes::All()...
         ID_LanguageBase = ID_ThemeBase + 128,     // ...then one per entry in AllLanguages()...
         ID_RecentFileBase = ID_LanguageBase + 64, // ...then one per recent-file slot...
-        ID_ClearRecentFiles = ID_RecentFileBase + 32 // ...leaving room for kMaxRecentFiles entries.
+        ID_ClearRecentFiles = ID_RecentFileBase + 32, // ...leaving room for kMaxRecentFiles entries.
+        ID_EncodingBase // ...then one per entry in TextEncoding::AllEncodings().
     };
 
     // Lets the user drop files from their OS file manager anywhere on the
@@ -153,6 +154,19 @@ ClearTextFrame::ClearTextFrame()
     m_languageMenu->Check(ID_LanguageBase, true); // Auto-Detect, index 0
     viewMenu->AppendSubMenu(m_languageMenu, "Language");
 
+    // Per-tab override of how a file's bytes were decoded, for when
+    // ReadFile()'s BOM/UTF-8-validity guess comes out wrong (see
+    // encoding.h). "Auto-Detect" (the default) restores that guess;
+    // picking anything else re-reads the file from disk as that encoding.
+    // Checkmark kept in sync with the active tab in
+    // OnPageChanged/UpdateEncodingMenuChecks, same as the Language menu.
+    m_encodingMenu = new wxMenu();
+    const std::vector<TextEncoding::Encoding> &encodings = TextEncoding::AllEncodings();
+    for (size_t i = 0; i < encodings.size(); i++)
+        m_encodingMenu->AppendRadioItem(ID_EncodingBase + (int)i, TextEncoding::EncodingDisplayName(encodings[i]));
+    m_encodingMenu->Check(ID_EncodingBase, true); // Auto-Detect, index 0
+    viewMenu->AppendSubMenu(m_encodingMenu, "Encoding");
+
     menuBar->Append(viewMenu, "&View");
 
     wxMenu *helpMenu = new wxMenu();
@@ -234,6 +248,8 @@ ClearTextFrame::ClearTextFrame()
     Bind(wxEVT_MENU, &ClearTextFrame::OnOpenRecent, this, ID_RecentFileBase,
          ID_RecentFileBase + (int)kMaxRecentFiles - 1);
     Bind(wxEVT_MENU, &ClearTextFrame::OnClearRecentFiles, this, ID_ClearRecentFiles);
+    Bind(wxEVT_MENU, &ClearTextFrame::OnSetEncoding, this, ID_EncodingBase,
+         ID_EncodingBase + (int)TextEncoding::AllEncodings().size() - 1);
     Bind(wxEVT_FIND, &ClearTextFrame::OnFindDialogEvent, this);
     Bind(wxEVT_FIND_NEXT, &ClearTextFrame::OnFindDialogEvent, this);
     Bind(wxEVT_FIND_REPLACE, &ClearTextFrame::OnFindDialogEvent, this);
@@ -261,13 +277,14 @@ void ClearTextFrame::OpenFilePath(const wxString &path)
     }
 
     wxString content;
-    if (!TextEncoding::ReadFile(path, content))
+    TextEncoding::Encoding detected = TextEncoding::Encoding::Utf8;
+    if (!TextEncoding::ReadFile(path, content, &detected))
     {
         wxMessageBox("Could not open file:\n" + path, "Error", wxOK | wxICON_ERROR, this);
         return;
     }
 
-    AddTab(wxFileName(path).GetFullName(), content, path);
+    AddTab(wxFileName(path).GetFullName(), content, path, detected);
     AddToRecentFiles(path);
 }
 
@@ -398,12 +415,14 @@ void ClearTextFrame::UpdateMarginWidth(wxStyledTextCtrl *stc)
     stc->SetMarginWidth(0, stc->TextWidth(wxSTC_STYLE_LINENUMBER, widest));
 }
 
-void ClearTextFrame::AddTab(const wxString &title, const wxString &content, const wxString &filePath)
+void ClearTextFrame::AddTab(const wxString &title, const wxString &content, const wxString &filePath,
+                             TextEncoding::Encoding detectedEncoding)
 {
     // Push tab metadata BEFORE AddPage, since AddPage synchronously fires
     // a page-changed event whose handler reads m_tabData by index.
     m_tabData.push_back(TabData());
     m_tabData.back().filePath = filePath;
+    m_tabData.back().detectedEncoding = detectedEncoding;
     if (!filePath.IsEmpty() && wxFileExists(filePath))
         m_tabData.back().fileModTime = wxFileName(filePath).GetModificationTime();
 
@@ -474,6 +493,34 @@ void ClearTextFrame::UpdateLanguageMenuChecks()
         if (languages[i].id == lang)
         {
             m_languageMenu->Check(ID_LanguageBase + (int)i, true);
+            break;
+        }
+    }
+}
+
+// Effective encoding for tab `index`: its View > Encoding override if one's
+// been set, otherwise whatever was auto-detected when the file was loaded.
+TextEncoding::Encoding ClearTextFrame::EffectiveEncoding(int index)
+{
+    if (m_tabData[index].encoding != TextEncoding::Encoding::Auto)
+        return m_tabData[index].encoding;
+    return m_tabData[index].detectedEncoding;
+}
+
+// Keeps the Encoding menu's radio checkmark in sync with the active tab's
+// override (or Auto-Detect, if it has none).
+void ClearTextFrame::UpdateEncodingMenuChecks()
+{
+    int sel = m_notebook->GetSelection();
+    TextEncoding::Encoding enc = (sel == wxNOT_FOUND || IsAddTabPage(sel))
+        ? TextEncoding::Encoding::Auto : m_tabData[sel].encoding;
+
+    const std::vector<TextEncoding::Encoding> &encodings = TextEncoding::AllEncodings();
+    for (size_t i = 0; i < encodings.size(); i++)
+    {
+        if (encodings[i] == enc)
+        {
+            m_encodingMenu->Check(ID_EncodingBase + (int)i, true);
             break;
         }
     }
@@ -638,12 +685,14 @@ void ClearTextFrame::OnPageChanged(wxAuiNotebookEvent &event)
     // same handler processes normally, so we just bail out of this one.
     if (sel != wxNOT_FOUND && IsAddTabPage(sel))
     {
-        AddTab("Untitled");
+        if (!m_closingTab)
+            AddTab("Untitled");
         return;
     }
 
     UpdateTitle();
     UpdateLanguageMenuChecks();
+    UpdateEncodingMenuChecks();
 
     if (sel != wxNOT_FOUND)
     {
@@ -837,6 +886,32 @@ void ClearTextFrame::OnSetLanguage(wxCommandEvent &event)
     UpdateMarginWidth(PageText(sel));
 }
 
+// Applies an explicit Encoding-menu choice to the current tab: re-reads its
+// file from disk decoded as that encoding, for when ReadFile()'s
+// BOM/UTF-8-validity guess came out wrong. Only meaningful for a tab
+// that's backed by a file on disk -- there's no raw bytes to re-decode
+// for an unsaved "Untitled" tab.
+void ClearTextFrame::OnSetEncoding(wxCommandEvent &event)
+{
+    int sel = m_notebook->GetSelection();
+    if (sel == wxNOT_FOUND || IsAddTabPage(sel)) return;
+
+    int idx = event.GetId() - ID_EncodingBase;
+    const std::vector<TextEncoding::Encoding> &encodings = TextEncoding::AllEncodings();
+    if (idx < 0 || idx >= (int)encodings.size()) return;
+
+    if (m_tabData[sel].filePath.IsEmpty())
+    {
+        wxMessageBox("This tab isn't backed by a file on disk, so there's no "
+            "raw bytes to re-decode.", "No File to Re-Decode", wxOK | wxICON_INFORMATION, this);
+        UpdateEncodingMenuChecks(); // put the checkmark back where it was
+        return;
+    }
+
+    ReloadTabAs(sel, encodings[idx], false); // no-ops (incl. the checkmark) if the user cancels
+    UpdateEncodingMenuChecks();
+}
+
 // ============================================================================
 // Tab lifecycle: new / close / save / reload
 // ============================================================================
@@ -868,8 +943,19 @@ bool ClearTextFrame::CloseTab(int index, bool addNewIfEmpty)
         }
     }
 
-    m_notebook->DeletePage(index);
     m_tabData.erase(m_tabData.begin() + index);
+
+    // DeletePage() may synchronously move the selection -- to the pinned
+    // "+" tab, if `index` was the last real tab -- and fire PAGE_CHANGED
+    // before this call even returns. m_tabData is already updated above
+    // (matching the notebook's own post-delete state, the same reason
+    // AddTab() updates m_tabData before touching the notebook), and
+    // m_closingTab keeps OnPageChanged from adding its own "Untitled" tab
+    // in response; the addNewIfEmpty check below is the one place that
+    // decides that.
+    m_closingTab = true;
+    m_notebook->DeletePage(index);
+    m_closingTab = false;
 
     if (addNewIfEmpty && m_tabData.empty())
         AddTab("Untitled");
@@ -960,8 +1046,14 @@ void ClearTextFrame::OnReload(wxCommandEvent &event)
 // Re-reads `index`'s file from disk, discarding any in-editor changes.
 // With `force` false and the tab modified, confirms with the user first
 // (used by the Reload menu item); `force` true skips the prompt (used
-// by CheckExternalModification, which has already asked).
+// by CheckExternalModification, which has already asked). Preserves
+// whatever encoding (Auto or an explicit override) the tab currently has.
 bool ClearTextFrame::ReloadTab(int index, bool force)
+{
+    return ReloadTabAs(index, m_tabData[index].encoding, force);
+}
+
+bool ClearTextFrame::ReloadTabAs(int index, TextEncoding::Encoding encoding, bool force)
 {
     const wxString &path = m_tabData[index].filePath;
     if (path.IsEmpty() || !wxFileExists(path)) return false;
@@ -976,7 +1068,11 @@ bool ClearTextFrame::ReloadTab(int index, bool force)
     }
 
     wxString content;
-    if (!TextEncoding::ReadFile(path, content))
+    TextEncoding::Encoding detected = encoding;
+    bool ok = (encoding == TextEncoding::Encoding::Auto)
+        ? TextEncoding::ReadFile(path, content, &detected)
+        : TextEncoding::ReadFileAs(path, encoding, content);
+    if (!ok)
     {
         wxMessageBox("Could not reload file:\n" + path, "Error", wxOK | wxICON_ERROR, this);
         return false;
@@ -991,6 +1087,8 @@ bool ClearTextFrame::ReloadTab(int index, bool force)
 
     m_tabData[index].modified = false;
     m_tabData[index].fileModTime = wxFileName(path).GetModificationTime();
+    m_tabData[index].encoding = encoding;
+    m_tabData[index].detectedEncoding = detected;
     UpdateTabLabel(index);
     UpdateTitle();
     return true;
