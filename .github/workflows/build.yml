@@ -153,7 +153,7 @@ jobs:
         retention-days: 7
 
   build-msi-windows:
-    needs: build-linux
+    needs: build-windows-msvc
     runs-on: windows-latest
     permissions:
       contents: write
@@ -164,12 +164,12 @@ jobs:
     - name: Download Build Artifacts
       uses: actions/download-artifact@v4
       with:
-        name: cleartext-build
+        name: cleartext-build-msvc
         path: .
 
     - name: Extract Build Files
       run: |
-        Expand-Archive -Path "ClearText-Portable.zip" -DestinationPath "artifacts/build/windows/" -Force
+        Expand-Archive -Path "ClearText-MSVC-Portable.zip" -DestinationPath "artifacts/build/windows/" -Force
 
     - name: Setup WiX Toolset
       run: |
@@ -338,7 +338,7 @@ jobs:
         retention-days: 7
 
   build-msix-windows:
-    needs: build-linux
+    needs: build-windows-msvc
     runs-on: windows-latest
     permissions:
       contents: write
@@ -349,12 +349,12 @@ jobs:
     - name: Download Build Artifacts
       uses: actions/download-artifact@v4
       with:
-        name: cleartext-build
+        name: cleartext-build-msvc
         path: .
 
     - name: Extract Build Files
       run: |
-        Expand-Archive -Path "ClearText-Portable.zip" -DestinationPath "msix-source\" -Force
+        Expand-Archive -Path "ClearText-MSVC-Portable.zip" -DestinationPath "msix-source\" -Force
 
     - name: Prepare MSIX Package Structure
       run: |
@@ -424,7 +424,7 @@ jobs:
           <Identity
             Name="JasonBrianHall.ClearText"
             Publisher="CN=7A3CF65F-504C-42F2-BABD-6A0512A0A017"
-            Version="${{ needs.build-linux.outputs.version }}"
+            Version="${{ needs.build-windows-msvc.outputs.version }}"
             ProcessorArchitecture="x64" />
 
           <Properties>
