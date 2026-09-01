@@ -523,7 +523,9 @@ static void ApplyCssStyles(wxStyledTextCtrl *stc)
     stc->StyleSetForeground(wxSTC_CSS_IMPORTANT, th.preprocessor);
     stc->StyleSetBold(wxSTC_CSS_IMPORTANT, true);
     stc->StyleSetForeground(wxSTC_CSS_DIRECTIVE, th.preprocessor);
+#ifdef wxSTC_CSS_MEDIA
     stc->StyleSetForeground(wxSTC_CSS_MEDIA, th.preprocessor);
+#endif
 }
 
 // ----------------------------------------------------------------------
