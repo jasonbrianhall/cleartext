@@ -142,7 +142,11 @@ jobs:
         }
 
         Write-Host "Static MSVC build — DLL dependencies:"
-        dumpbin /dependents "package\cleartext.exe" | Select-String "\.dll"
+        if (Get-Command dumpbin -ErrorAction SilentlyContinue) {
+          dumpbin /dependents "package\cleartext.exe" | Select-String "\.dll"
+        } else {
+          Write-Host "(dumpbin not on PATH outside a VS dev shell — skipping DLL listing)"
+        }
 
         Compress-Archive -Path "package\*" -DestinationPath "ClearText-MSVC-Portable.zip"
 
