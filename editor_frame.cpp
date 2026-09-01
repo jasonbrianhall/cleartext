@@ -404,7 +404,11 @@ void ClearTextFrame::SetupEditor(wxStyledTextCtrl *stc)
     // Scintilla's own built-in right-click menu doesn't know about our
     // commands (Copy as HTML, etc.) and can't be extended, so it's
     // replaced with a real wx menu -- see OnEditorContextMenu.
+#ifdef wxSTC_POPUP_NEVER
     stc->UsePopUp(wxSTC_POPUP_NEVER);
+#else
+    stc->UsePopUp(false); // older wx: UsePopUp(bool) only, no NEVER/ALWAYS/TEXT enum
+#endif
 }
 
 // Grows the line-number margin as the document gains more digits

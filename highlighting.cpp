@@ -523,7 +523,9 @@ static void ApplyCssStyles(wxStyledTextCtrl *stc)
     stc->StyleSetForeground(wxSTC_CSS_IMPORTANT, th.preprocessor);
     stc->StyleSetBold(wxSTC_CSS_IMPORTANT, true);
     stc->StyleSetForeground(wxSTC_CSS_DIRECTIVE, th.preprocessor);
+#ifdef wxSTC_CSS_MEDIA
     stc->StyleSetForeground(wxSTC_CSS_MEDIA, th.preprocessor);
+#endif
 }
 
 // ----------------------------------------------------------------------
@@ -532,6 +534,7 @@ static void ApplyCssStyles(wxStyledTextCtrl *stc)
 
 static void ApplyJsonStyles(wxStyledTextCtrl *stc)
 {
+#ifdef wxSTC_LEX_JSON
     const EditorTheme &th = CurrentTheme();
     stc->SetLexer(wxSTC_LEX_JSON);
     SetCommonStyleDefaults(stc);
@@ -550,6 +553,11 @@ static void ApplyJsonStyles(wxStyledTextCtrl *stc)
     stc->StyleSetForeground(wxSTC_JSON_URI, th.string);
     stc->StyleSetForeground(wxSTC_JSON_COMPACTIRI, th.string);
     stc->StyleSetForeground(wxSTC_JSON_ERROR, wxColour(220, 60, 60));
+#else
+    // JSON lexer unavailable in this wxWidgets build (added in 3.1.0) --
+    // fall back to plain text rather than fail to compile.
+    ApplyPlainText(stc);
+#endif
 }
 
 // ----------------------------------------------------------------------
@@ -650,8 +658,12 @@ static void ApplyPowerShellStyles(wxStyledTextCtrl *stc)
     stc->StyleSetForeground(wxSTC_POWERSHELL_NUMBER, th.number);
     stc->StyleSetForeground(wxSTC_POWERSHELL_STRING, th.string);
     stc->StyleSetForeground(wxSTC_POWERSHELL_CHARACTER, th.string);
+#ifdef wxSTC_POWERSHELL_HERE_STRING
     stc->StyleSetForeground(wxSTC_POWERSHELL_HERE_STRING, th.string);
+#endif
+#ifdef wxSTC_POWERSHELL_HERE_CHARACTER
     stc->StyleSetForeground(wxSTC_POWERSHELL_HERE_CHARACTER, th.string);
+#endif
     stc->StyleSetForeground(wxSTC_POWERSHELL_VARIABLE, th.attribute);
     stc->StyleSetForeground(wxSTC_POWERSHELL_KEYWORD, th.keyword);
     stc->StyleSetBold(wxSTC_POWERSHELL_KEYWORD, true);
@@ -743,7 +755,9 @@ static void ApplyCoffeeScriptStyles(wxStyledTextCtrl *stc)
     stc->StyleSetBold(wxSTC_COFFEESCRIPT_WORD, true);
     stc->StyleSetForeground(wxSTC_COFFEESCRIPT_WORD2, th.keyword2);
     stc->StyleSetForeground(wxSTC_COFFEESCRIPT_GLOBALCLASS, th.keyword2);
+#ifdef wxSTC_COFFEESCRIPT_INSTANCEPROPERTY
     stc->StyleSetForeground(wxSTC_COFFEESCRIPT_INSTANCEPROPERTY, th.attribute);
+#endif
     stc->StyleSetForeground(wxSTC_COFFEESCRIPT_OPERATOR, th.operatorColor);
 }
 
@@ -869,6 +883,7 @@ static void ApplyLuaStyles(wxStyledTextCtrl *stc)
 
 static void ApplyRustStyles(wxStyledTextCtrl *stc)
 {
+#ifdef wxSTC_LEX_RUST
     const EditorTheme &th = CurrentTheme();
     stc->SetLexer(wxSTC_LEX_RUST);
     SetCommonStyleDefaults(stc);
@@ -899,6 +914,11 @@ static void ApplyRustStyles(wxStyledTextCtrl *stc)
     stc->StyleSetForeground(wxSTC_RUST_LIFETIME, th.attribute);
     stc->StyleSetForeground(wxSTC_RUST_OPERATOR, th.operatorColor);
     stc->StyleSetForeground(wxSTC_RUST_LEXERROR, wxColour(220, 60, 60));
+#else
+    // Rust lexer unavailable in this wxWidgets build (added in 3.1.0) --
+    // fall back to plain text rather than fail to compile.
+    ApplyPlainText(stc);
+#endif
 }
 
 // ----------------------------------------------------------------------
@@ -1101,10 +1121,12 @@ static void ApplyVerilogStyles(wxStyledTextCtrl *stc)
     stc->StyleSetForeground(wxSTC_V_WORD2, th.keyword2);
     stc->StyleSetForeground(wxSTC_V_WORD3, th.preprocessor);
     stc->StyleSetForeground(wxSTC_V_PREPROCESSOR, th.preprocessor);
+#ifdef wxSTC_V_INPUT
     stc->StyleSetForeground(wxSTC_V_INPUT, th.attribute);
     stc->StyleSetForeground(wxSTC_V_OUTPUT, th.attribute);
     stc->StyleSetForeground(wxSTC_V_INOUT, th.attribute);
     stc->StyleSetForeground(wxSTC_V_PORT_CONNECT, th.attribute);
+#endif
     stc->StyleSetForeground(wxSTC_V_OPERATOR, th.operatorColor);
     stc->StyleSetForeground(wxSTC_V_STRINGEOL, wxColour(220, 60, 60));
 }
@@ -1126,7 +1148,9 @@ static void ApplyVhdlStyles(wxStyledTextCtrl *stc)
 
     stc->StyleSetForeground(wxSTC_VHDL_COMMENT, th.comment);
     stc->StyleSetForeground(wxSTC_VHDL_COMMENTLINEBANG, th.comment);
+#ifdef wxSTC_VHDL_BLOCK_COMMENT
     stc->StyleSetForeground(wxSTC_VHDL_BLOCK_COMMENT, th.comment);
+#endif
     stc->StyleSetForeground(wxSTC_VHDL_NUMBER, th.number);
     stc->StyleSetForeground(wxSTC_VHDL_STRING, th.string);
     stc->StyleSetForeground(wxSTC_VHDL_KEYWORD, th.keyword);
@@ -1235,10 +1259,16 @@ static void ApplyHaskellStyles(wxStyledTextCtrl *stc)
     stc->StyleSetForeground(wxSTC_HA_CAPITAL, th.keyword2);
     stc->StyleSetForeground(wxSTC_HA_MODULE, th.keyword2);
     stc->StyleSetForeground(wxSTC_HA_IMPORT, th.preprocessor);
+#ifdef wxSTC_HA_PRAGMA
     stc->StyleSetForeground(wxSTC_HA_PRAGMA, th.preprocessor);
+#endif
     stc->StyleSetForeground(wxSTC_HA_OPERATOR, th.operatorColor);
+#ifdef wxSTC_HA_RESERVED_OPERATOR
     stc->StyleSetForeground(wxSTC_HA_RESERVED_OPERATOR, th.operatorColor);
+#endif
+#ifdef wxSTC_HA_STRINGEOL
     stc->StyleSetForeground(wxSTC_HA_STRINGEOL, wxColour(220, 60, 60));
+#endif
 }
 
 // ----------------------------------------------------------------------
@@ -1444,9 +1474,15 @@ static void ApplyBasicStyles(wxStyledTextCtrl *stc, bool isVbScript)
         "stop string sub then to true type typeof until wend while with withevents");
 
     stc->StyleSetForeground(wxSTC_B_COMMENT, th.comment);
+#ifdef wxSTC_B_COMMENTBLOCK
     stc->StyleSetForeground(wxSTC_B_COMMENTBLOCK, th.comment);
+#endif
+#ifdef wxSTC_B_DOCLINE
     stc->StyleSetForeground(wxSTC_B_DOCLINE, th.comment);
+#endif
+#ifdef wxSTC_B_DOCBLOCK
     stc->StyleSetForeground(wxSTC_B_DOCBLOCK, th.comment);
+#endif
     stc->StyleSetForeground(wxSTC_B_NUMBER, th.number);
     stc->StyleSetForeground(wxSTC_B_BINNUMBER, th.number);
     stc->StyleSetForeground(wxSTC_B_HEXNUMBER, th.number);
