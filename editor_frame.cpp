@@ -714,7 +714,15 @@ void ClearTextFrame::OnEditorContextMenu(wxContextMenuEvent &event)
         wxString emoji = ShowEmojiPicker(this);
         if (emoji.IsEmpty()) return;
         stc->InsertText(insertPos, emoji);
-        stc->GotoPos(insertPos + (int)emoji.length());
+        // GotoPos takes a *byte* offset into Scintilla's UTF-8 buffer, not
+        // a wxString character count -- emoji.length() would be 1 (or 2,
+        // for a surrogate-pair-encoded astral character on some
+        // platforms), never the 4 UTF-8 bytes an emoji like this actually
+        // takes up. Using it here left the caret mid-glyph, so the very
+        // next Backspace only removed one byte instead of the whole
+        // character (until something else, like a mouse click, snapped
+        // the caret back to a real character boundary).
+        stc->GotoPos(insertPos + (int)emoji.utf8_str().length());
         stc->SetFocus();
     }, ID_InsertEmoji);
 
