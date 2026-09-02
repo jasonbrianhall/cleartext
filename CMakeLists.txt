@@ -23,11 +23,7 @@ endif()
 set(SRC
     main.cpp editor_frame.cpp ipc.cpp app_config.cpp printing.cpp highlighting.cpp
     custom_themes.cpp encoding.cpp find_in_files.cpp theme_editor.cpp copy_html.cpp
-)
-
-set(HEADERS
-    themes.h highlighting.h editor_frame.h ipc.h app_config.h printing.h
-    custom_themes.h encoding.h find_in_files.h theme_editor.h copy_html.h
+    emoji_picker.cpp
 )
 
 # Embed icon if present
@@ -36,7 +32,7 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/cleartext.rc" AND EXISTS "${CMAKE_SOURCE_DIR}/ico
     set(RC_FILE "${CMAKE_SOURCE_DIR}/cleartext.rc")
 endif()
 
-add_executable(cleartext WIN32 ${SRC} ${HEADERS} ${RC_FILE})
+add_executable(cleartext WIN32 ${SRC} ${RC_FILE})
 
 if(WIN32)
     target_compile_definitions(cleartext PRIVATE WIN32 _WIN32 _WIN32_WINNT=0x0A00)

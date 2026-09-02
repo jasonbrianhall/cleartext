@@ -8,6 +8,7 @@
 #include "find_in_files.h"
 #include "theme_editor.h"
 #include "copy_html.h"
+#include "emoji_picker.h"
 #include <wx/filename.h>
 #include <wx/print.h>
 #include <wx/aboutdlg.h>
@@ -40,6 +41,7 @@ namespace
         ID_ShowWhitespace,
         ID_TrimTrailingWhitespace,
         ID_CopyAsHtml,
+        ID_InsertEmoji,
         ID_NewTheme,
         ID_EditTheme,
         ID_DeleteTheme,
@@ -381,6 +383,15 @@ wxStyledTextCtrl *ClearTextFrame::PageText(int index)
 
 void ClearTextFrame::SetupEditor(wxStyledTextCtrl *stc)
 {
+    // Without this, Scintilla treats the buffer as raw 8-bit bytes: a
+    // multi-byte UTF-8 sequence (accented letters, emoji, ...) gets split
+    // into several single-byte "characters", so it renders as hex escapes
+    // and Backspace/Delete/Left/Right move one byte at a time instead of
+    // one character. All of ClearText's own I/O is UTF-8 already (see
+    // encoding.h's ReadFile/WriteFile), so this just makes Scintilla's
+    // idea of "one character" match that.
+    stc->SetCodePage(wxSTC_CP_UTF8);
+
     // Line number margin
     stc->SetMarginType(0, wxSTC_MARGIN_NUMBER);
     stc->SetMarginWidth(1, 0); // hide the unused symbol margin
@@ -661,6 +672,8 @@ void ClearTextFrame::OnEditorContextMenu(wxContextMenuEvent &event)
     menu.Append(wxID_PASTE, "Paste\tCtrl+V");
     menu.AppendSeparator();
     menu.Append(wxID_SELECTALL, "Select All\tCtrl+A");
+    menu.AppendSeparator();
+    menu.Append(ID_InsertEmoji, "Insert Emoji...");
 
     menu.Enable(wxID_UNDO, stc->CanUndo());
     menu.Enable(wxID_REDO, stc->CanRedo());
@@ -675,6 +688,22 @@ void ClearTextFrame::OnEditorContextMenu(wxContextMenuEvent &event)
     wxPoint clientPos = (screenPos == wxDefaultPosition)
         ? wxPoint(stc->GetClientSize().GetWidth() / 2, stc->GetClientSize().GetHeight() / 2)
         : stc->ScreenToClient(screenPos);
+
+    // Insert Emoji needs to remember *where* to insert -- the document
+    // position under the right-click, not wherever the caret happens to be
+    // -- so it's bound locally here (which wins over the frame's
+    // propagated Bind()s) rather than routed through the usual OnXxx
+    // handler pattern the other items use.
+    int insertPos = (screenPos == wxDefaultPosition)
+        ? stc->GetCurrentPos()
+        : stc->PositionFromPoint(clientPos);
+    menu.Bind(wxEVT_MENU, [this, stc, insertPos](wxCommandEvent&) {
+        wxString emoji = ShowEmojiPicker(this);
+        if (emoji.IsEmpty()) return;
+        stc->InsertText(insertPos, emoji);
+        stc->GotoPos(insertPos + (int)emoji.length());
+        stc->SetFocus();
+    }, ID_InsertEmoji);
 
     stc->PopupMenu(&menu, clientPos);
 }
