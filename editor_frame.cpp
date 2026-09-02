@@ -270,24 +270,37 @@ ClearTextFrame::ClearTextFrame()
 
 void ClearTextFrame::OpenFilePath(const wxString &path)
 {
-    if (!wxFileExists(path))
+    // Always resolve to an absolute path before doing anything else. A
+    // relative path (as typically passed on the command line, e.g.
+    // `cleartext foo.txt`) is only meaningful relative to *this* process's
+    // current working directory -- if it were kept as-is, it would get
+    // carried into the tab's stored filePath, the recent-files list, and
+    // the saved session, and a later launch (very possibly from a
+    // different working directory) would resolve it against the wrong
+    // directory, find nothing there, and silently open a blank tab instead
+    // of the file.
+    wxFileName fn(path);
+    fn.MakeAbsolute();
+    wxString absPath = fn.GetFullPath();
+
+    if (!wxFileExists(absPath))
     {
         // No file there yet — open a blank tab pointed at this path so
         // Save writes it there directly, rather than erroring out.
-        AddTab(wxFileName(path).GetFullName(), "", path);
+        AddTab(wxFileName(absPath).GetFullName(), "", absPath);
         return;
     }
 
     wxString content;
     TextEncoding::Encoding detected = TextEncoding::Encoding::Utf8;
-    if (!TextEncoding::ReadFile(path, content, &detected))
+    if (!TextEncoding::ReadFile(absPath, content, &detected))
     {
-        wxMessageBox("Could not open file:\n" + path, "Error", wxOK | wxICON_ERROR, this);
+        wxMessageBox("Could not open file:\n" + absPath, "Error", wxOK | wxICON_ERROR, this);
         return;
     }
 
-    AddTab(wxFileName(path).GetFullName(), content, path, detected);
-    AddToRecentFiles(path);
+    AddTab(wxFileName(absPath).GetFullName(), content, absPath, detected);
+    AddToRecentFiles(absPath);
 }
 
 void ClearTextFrame::CloseInitialBlankTabIfUnused()
