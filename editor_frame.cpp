@@ -8,6 +8,7 @@
 #include "find_in_files.h"
 #include "theme_editor.h"
 #include "copy_html.h"
+#include "emoji_picker.h"
 #include <wx/filename.h>
 #include <wx/print.h>
 #include <wx/aboutdlg.h>
@@ -40,6 +41,7 @@ namespace
         ID_ShowWhitespace,
         ID_TrimTrailingWhitespace,
         ID_CopyAsHtml,
+        ID_InsertEmoji,
         ID_NewTheme,
         ID_EditTheme,
         ID_DeleteTheme,
@@ -268,24 +270,37 @@ ClearTextFrame::ClearTextFrame()
 
 void ClearTextFrame::OpenFilePath(const wxString &path)
 {
-    if (!wxFileExists(path))
+    // Always resolve to an absolute path before doing anything else. A
+    // relative path (as typically passed on the command line, e.g.
+    // `cleartext foo.txt`) is only meaningful relative to *this* process's
+    // current working directory -- if it were kept as-is, it would get
+    // carried into the tab's stored filePath, the recent-files list, and
+    // the saved session, and a later launch (very possibly from a
+    // different working directory) would resolve it against the wrong
+    // directory, find nothing there, and silently open a blank tab instead
+    // of the file.
+    wxFileName fn(path);
+    fn.MakeAbsolute();
+    wxString absPath = fn.GetFullPath();
+
+    if (!wxFileExists(absPath))
     {
         // No file there yet — open a blank tab pointed at this path so
         // Save writes it there directly, rather than erroring out.
-        AddTab(wxFileName(path).GetFullName(), "", path);
+        AddTab(wxFileName(absPath).GetFullName(), "", absPath);
         return;
     }
 
     wxString content;
     TextEncoding::Encoding detected = TextEncoding::Encoding::Utf8;
-    if (!TextEncoding::ReadFile(path, content, &detected))
+    if (!TextEncoding::ReadFile(absPath, content, &detected))
     {
-        wxMessageBox("Could not open file:\n" + path, "Error", wxOK | wxICON_ERROR, this);
+        wxMessageBox("Could not open file:\n" + absPath, "Error", wxOK | wxICON_ERROR, this);
         return;
     }
 
-    AddTab(wxFileName(path).GetFullName(), content, path, detected);
-    AddToRecentFiles(path);
+    AddTab(wxFileName(absPath).GetFullName(), content, absPath, detected);
+    AddToRecentFiles(absPath);
 }
 
 void ClearTextFrame::CloseInitialBlankTabIfUnused()
@@ -381,6 +396,15 @@ wxStyledTextCtrl *ClearTextFrame::PageText(int index)
 
 void ClearTextFrame::SetupEditor(wxStyledTextCtrl *stc)
 {
+    // Without this, Scintilla treats the buffer as raw 8-bit bytes: a
+    // multi-byte UTF-8 sequence (accented letters, emoji, ...) gets split
+    // into several single-byte "characters", so it renders as hex escapes
+    // and Backspace/Delete/Left/Right move one byte at a time instead of
+    // one character. All of ClearText's own I/O is UTF-8 already (see
+    // encoding.h's ReadFile/WriteFile), so this just makes Scintilla's
+    // idea of "one character" match that.
+    stc->SetCodePage(wxSTC_CP_UTF8);
+
     // Line number margin
     stc->SetMarginType(0, wxSTC_MARGIN_NUMBER);
     stc->SetMarginWidth(1, 0); // hide the unused symbol margin
@@ -661,6 +685,8 @@ void ClearTextFrame::OnEditorContextMenu(wxContextMenuEvent &event)
     menu.Append(wxID_PASTE, "Paste\tCtrl+V");
     menu.AppendSeparator();
     menu.Append(wxID_SELECTALL, "Select All\tCtrl+A");
+    menu.AppendSeparator();
+    menu.Append(ID_InsertEmoji, "Insert Emoji...");
 
     menu.Enable(wxID_UNDO, stc->CanUndo());
     menu.Enable(wxID_REDO, stc->CanRedo());
@@ -675,6 +701,30 @@ void ClearTextFrame::OnEditorContextMenu(wxContextMenuEvent &event)
     wxPoint clientPos = (screenPos == wxDefaultPosition)
         ? wxPoint(stc->GetClientSize().GetWidth() / 2, stc->GetClientSize().GetHeight() / 2)
         : stc->ScreenToClient(screenPos);
+
+    // Insert Emoji needs to remember *where* to insert -- the document
+    // position under the right-click, not wherever the caret happens to be
+    // -- so it's bound locally here (which wins over the frame's
+    // propagated Bind()s) rather than routed through the usual OnXxx
+    // handler pattern the other items use.
+    int insertPos = (screenPos == wxDefaultPosition)
+        ? stc->GetCurrentPos()
+        : stc->PositionFromPoint(clientPos);
+    menu.Bind(wxEVT_MENU, [this, stc, insertPos](wxCommandEvent&) {
+        wxString emoji = ShowEmojiPicker(this);
+        if (emoji.IsEmpty()) return;
+        stc->InsertText(insertPos, emoji);
+        // GotoPos takes a *byte* offset into Scintilla's UTF-8 buffer, not
+        // a wxString character count -- emoji.length() would be 1 (or 2,
+        // for a surrogate-pair-encoded astral character on some
+        // platforms), never the 4 UTF-8 bytes an emoji like this actually
+        // takes up. Using it here left the caret mid-glyph, so the very
+        // next Backspace only removed one byte instead of the whole
+        // character (until something else, like a mouse click, snapped
+        // the caret back to a real character boundary).
+        stc->GotoPos(insertPos + (int)emoji.utf8_str().length());
+        stc->SetFocus();
+    }, ID_InsertEmoji);
 
     stc->PopupMenu(&menu, clientPos);
 }

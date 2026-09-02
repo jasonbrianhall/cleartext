@@ -7,9 +7,8 @@ CXX_WIN   = x86_64-w64-mingw32-g++
 
 TARGET     = cleartext
 SRC        = main.cpp editor_frame.cpp ipc.cpp app_config.cpp printing.cpp highlighting.cpp \
-             custom_themes.cpp encoding.cpp find_in_files.cpp theme_editor.cpp copy_html.cpp
-HEADERS    = themes.h highlighting.h editor_frame.h ipc.h app_config.h printing.h \
-             custom_themes.h encoding.h find_in_files.h theme_editor.h copy_html.h
+             custom_themes.cpp encoding.cpp find_in_files.cpp theme_editor.cpp copy_html.cpp \
+             emoji_picker.cpp
 
 BUILD_DIR_LINUX       = build/linux
 BUILD_DIR_LINUX_DEBUG = build/linux_debug
@@ -68,7 +67,7 @@ all: linux
 
 linux: $(EXECUTABLE_LINUX)
 
-$(EXECUTABLE_LINUX): $(SRC) $(HEADERS)
+$(EXECUTABLE_LINUX): $(SRC)
 	@mkdir -p $(BUILD_DIR_LINUX)
 	$(CXX_LINUX) $(CXXFLAGS_LINUX) $(SRC) -o $(EXECUTABLE_LINUX) $(LDFLAGS_LINUX)
 	@echo "Built $(EXECUTABLE_LINUX)"
@@ -89,7 +88,7 @@ windows: $(EXECUTABLE_WIN)
 		echo "  libwx_baseu-3.0-x86_64-w64-mingw32.dll, libwinpthread-1.dll"; \
 	fi
 
-$(EXECUTABLE_WIN): $(SRC) $(HEADERS) $(ICON_RES)
+$(EXECUTABLE_WIN): $(SRC) $(ICON_RES)
 	@mkdir -p $(BUILD_DIR_WIN)
 	$(CXX_WIN) $(CXXFLAGS_WIN) $(SRC) $(ICON_RES) -o $(EXECUTABLE_WIN) $(LDFLAGS_WIN)
 	@echo "Built $(EXECUTABLE_WIN)"
@@ -100,7 +99,7 @@ $(BUILD_DIR_WIN)/cleartext_res.o: cleartext.rc icon.ico
 
 debug: $(EXECUTABLE_LINUX_DEBUG)
 
-$(EXECUTABLE_LINUX_DEBUG): $(SRC) $(HEADERS)
+$(EXECUTABLE_LINUX_DEBUG): $(SRC)
 	@mkdir -p $(BUILD_DIR_LINUX_DEBUG)
 	$(CXX_LINUX) $(CXXFLAGS_LINUX_DEBUG) $(SRC) -o $(EXECUTABLE_LINUX_DEBUG) $(LDFLAGS_LINUX_DEBUG)
 	@echo "Built $(EXECUTABLE_LINUX_DEBUG) — just run it directly; ASan/UBSan print a stack trace on crash"
