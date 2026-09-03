@@ -95,6 +95,12 @@ private:
     // -- see the .cpp for why this is needed at all. Call after SetText
     // or ApplyHighlighting.
     void RefreshFolding(wxStyledTextCtrl *stc);
+    // Re-indents a just-closed bracket's line to match its opener's line,
+    // if the closer is the only non-whitespace thing on it; always leaves
+    // the caret positioned right after the closer. Shared by the "skip
+    // over an existing closer" and "genuinely insert one" paths -- see
+    // the .cpp for why both need it.
+    void MaybeDedentClosingBracketLine(wxStyledTextCtrl *stc, int closePos);
     void AddTab(const wxString &title, const wxString &content = "", const wxString &filePath = "",
                 TextEncoding::Encoding detectedEncoding = TextEncoding::Encoding::Utf8);
     void UpdateTabLabel(int index);

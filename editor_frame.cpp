@@ -490,6 +490,39 @@ void ClearTextFrame::RefreshFolding(wxStyledTextCtrl *stc)
     stc->Colourise(0, -1);
 }
 
+// Shared by OnEditorChar (typing a closer that just skips over one already
+// auto-inserted -- no character actually gets inserted there, so it never
+// reaches OnEditorCharAdded on its own) and OnEditorCharAdded (typing a
+// closer that's genuinely new text). Either way, `closePos` is the closer
+// character's position, already in the document. If it's the first
+// non-whitespace thing on its line, re-indents that line to match its
+// opener's line -- e.g. closing "int main(void) {" pulls "}" back to
+// column 0 instead of leaving it under the body -- then always leaves the
+// caret right after the closer.
+void ClearTextFrame::MaybeDedentClosingBracketLine(wxStyledTextCtrl *stc, int closePos)
+{
+    int line = stc->LineFromPosition(closePos);
+    int lineStart = stc->PositionFromLine(line);
+    wxString beforeOnLine = stc->GetTextRange(lineStart, closePos);
+    beforeOnLine.Trim(true).Trim(false);
+
+    if (beforeOnLine.IsEmpty())
+    {
+        int matchPos = stc->BraceMatch(closePos);
+        if (matchPos != wxSTC_INVALID_POSITION)
+        {
+            int wantIndent = stc->GetLineIndentation(stc->LineFromPosition(matchPos));
+            if (wantIndent != stc->GetLineIndentation(line))
+            {
+                stc->SetLineIndentation(line, wantIndent);
+                stc->GotoPos(stc->GetLineIndentPosition(line) + 1);
+                return;
+            }
+        }
+    }
+    stc->GotoPos(closePos + 1);
+}
+
 void ClearTextFrame::AddTab(const wxString &title, const wxString &content, const wxString &filePath,
                              TextEncoding::Encoding detectedEncoding)
 {
@@ -738,7 +771,7 @@ void ClearTextFrame::OnEditorChar(wxKeyEvent &event)
         {
             if (pos < stc->GetTextLength() && stc->GetCharAt(pos) == (unsigned char)b.close)
             {
-                stc->GotoPos(pos + 1);
+                MaybeDedentClosingBracketLine(stc, pos);
                 return;
             }
             event.Skip();
@@ -804,12 +837,63 @@ void ClearTextFrame::OnEditorChar(wxKeyEvent &event)
     event.Skip();
 }
 
-// Auto-closes an HTML/XML tag right after its opening ">" is typed.
+// Auto-indents on Enter, and auto-closes an HTML/XML tag right after its
+// opening ">" is typed.
 void ClearTextFrame::OnEditorCharAdded(wxStyledTextEvent &event)
 {
-    if (event.GetKey() != '>') return;
-
     wxStyledTextCtrl *stc = (wxStyledTextCtrl*)event.GetEventObject();
+    int key = event.GetKey();
+
+    // Scintilla doesn't indent a new line on its own -- it just breaks the
+    // line at the caret. This copies the previous line's indentation
+    // (plain "keep typing at the same level"), and adds one more level if
+    // that line opens a block, so "int main(void) {" + Enter lands the
+    // caret ready to type the body rather than at column 0.
+    //
+    // For a CRLF line ending this fires twice (once for '\r', once for
+    // '\n'); only reacting to '\n' means the indent is applied exactly
+    // once, after both characters are already in the document.
+    if (key == '\n')
+    {
+        int line = stc->GetCurrentLine();
+        if (line > 0)
+        {
+            int prevLine = line - 1;
+            wxString trimmed = stc->GetLine(prevLine);
+            trimmed.Trim(true).Trim(false);
+
+            int indent = stc->GetLineIndentation(prevLine);
+            if (!trimmed.IsEmpty())
+            {
+                wxUniChar last = trimmed.Last();
+                if (last == '{' || last == '(' || last == '[')
+                    indent += (stc->GetIndent() > 0 ? stc->GetIndent() : stc->GetTabWidth());
+            }
+
+            if (indent > 0)
+            {
+                stc->SetLineIndentation(line, indent);
+                stc->GotoPos(stc->GetLineIndentPosition(line));
+            }
+        }
+        return;
+    }
+
+    // Typing a closing bracket as the first thing on an (auto-)indented
+    // line dedents that line back to match its opener's line, so closing
+    // off a block doesn't leave it sitting one level too deep -- e.g.
+    // finishing the body of "int main(void) {" by typing "}" pulls it
+    // back to column 0 instead of staying indented under the body. Also
+    // reached from OnEditorChar when the "}" being typed just skips over
+    // one auto-close already placed -- the common case -- since that path
+    // never inserts a character and so never reaches here on its own.
+    if (key == ')' || key == ']' || key == '}')
+    {
+        MaybeDedentClosingBracketLine(stc, stc->GetCurrentPos() - 1);
+        return;
+    }
+
+    if (key != '>') return;
     int idx = IndexOf(stc);
     if (idx < 0) return;
 
