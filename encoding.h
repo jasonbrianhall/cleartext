@@ -49,8 +49,10 @@ namespace TextEncoding
     // other leading bytes are decoded as ordinary content.
     bool ReadFileAs(const wxString &path, Encoding encoding, wxString &outContent);
 
-    // Writes `content` to `path` as UTF-8 without a byte-order mark --
-    // ClearText's on-disk save format, regardless of how the file was
-    // originally encoded when it was opened.
-    bool WriteFile(const wxString &path, const wxString &content);
+    // Writes `content` to `path` encoded as `encoding` -- UTF-16LE/BE are
+    // written with a leading byte-order mark (there's no other way to
+    // signal which one it is); UTF-8 and Latin-1 are written without one.
+    // Defaults to UTF-8, ClearText's original on-disk format, when the
+    // caller doesn't care.
+    bool WriteFile(const wxString &path, const wxString &content, Encoding encoding = Encoding::Utf8);
 }
