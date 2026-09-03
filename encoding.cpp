@@ -161,11 +161,50 @@ bool ReadFileAs(const wxString &path, Encoding encoding, wxString &outContent)
     return true;
 }
 
-bool WriteFile(const wxString &path, const wxString &content)
+namespace
+{
+    // Writes `bom` followed by `content` re-encoded via `conv` (a 16-bit
+    // conversion). Used for the two UTF-16 variants, which are otherwise
+    // indistinguishable on disk without one.
+    bool WriteWithBom(wxFile &file, const unsigned char (&bom)[2], const wxString &content, wxMBConv &conv)
+    {
+        if (file.Write(bom, 2) != 2) return false;
+        if (content.IsEmpty()) return true;
+
+        const wxScopedCharBuffer buf = content.mb_str(conv);
+        size_t len = buf.length();
+        if (len == 0) return true;
+        return file.Write(buf.data(), len) == len;
+    }
+}
+
+bool WriteFile(const wxString &path, const wxString &content, Encoding encoding)
 {
     wxFile file(path, wxFile::write);
     if (!file.IsOpened()) return false;
-    return file.Write(content, wxConvUTF8);
+
+    switch (encoding)
+    {
+        case Encoding::Utf16LE:
+        {
+            static const unsigned char bom[2] = {0xFF, 0xFE};
+            wxMBConvUTF16LE conv;
+            return WriteWithBom(file, bom, content, conv);
+        }
+        case Encoding::Utf16BE:
+        {
+            static const unsigned char bom[2] = {0xFE, 0xFF};
+            wxMBConvUTF16BE conv;
+            return WriteWithBom(file, bom, content, conv);
+        }
+        case Encoding::Latin1:
+            return file.Write(content, wxConvISO8859_1);
+
+        case Encoding::Utf8:
+        case Encoding::Auto: // shouldn't happen; treat like UTF-8
+        default:
+            return file.Write(content, wxConvUTF8);
+    }
 }
 
 } // namespace TextEncoding

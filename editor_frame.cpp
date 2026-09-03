@@ -45,6 +45,7 @@ namespace
         ID_NewTheme,
         ID_EditTheme,
         ID_DeleteTheme,
+        ID_Statistics,
         ID_ThemeBase = wxID_HIGHEST + 100,        // one radio id per entry in CustomThemes::All()...
         ID_LanguageBase = ID_ThemeBase + 128,     // ...then one per entry in AllLanguages()...
         ID_RecentFileBase = ID_LanguageBase + 64, // ...then one per recent-file slot...
@@ -169,6 +170,9 @@ ClearTextFrame::ClearTextFrame()
     m_encodingMenu->Check(ID_EncodingBase, true); // Auto-Detect, index 0
     viewMenu->AppendSubMenu(m_encodingMenu, "Encoding");
 
+    viewMenu->AppendSeparator();
+    viewMenu->Append(ID_Statistics, "Statistics...\tCtrl+Shift+I");
+
     menuBar->Append(viewMenu, "&View");
 
     wxMenu *helpMenu = new wxMenu();
@@ -228,6 +232,7 @@ ClearTextFrame::ClearTextFrame()
     Bind(wxEVT_MENU, &ClearTextFrame::OnSelectAll, this, wxID_SELECTALL);
     Bind(wxEVT_MENU, &ClearTextFrame::OnPrint, this, wxID_PRINT);
     Bind(wxEVT_MENU, &ClearTextFrame::OnAbout, this, wxID_ABOUT);
+    Bind(wxEVT_MENU, &ClearTextFrame::OnStatistics, this, ID_Statistics);
     Bind(wxEVT_MENU, &ClearTextFrame::OnFindMenu, this, wxID_FIND);
     Bind(wxEVT_MENU, &ClearTextFrame::OnReplaceMenu, this, wxID_REPLACE);
     Bind(wxEVT_MENU, &ClearTextFrame::OnFindNext, this, ID_FindNext);
@@ -940,11 +945,13 @@ void ClearTextFrame::OnSetLanguage(wxCommandEvent &event)
     UpdateMarginWidth(PageText(sel));
 }
 
-// Applies an explicit Encoding-menu choice to the current tab: re-reads its
-// file from disk decoded as that encoding, for when ReadFile()'s
-// BOM/UTF-8-validity guess came out wrong. Only meaningful for a tab
-// that's backed by a file on disk -- there's no raw bytes to re-decode
-// for an unsaved "Untitled" tab.
+// Applies an explicit Encoding-menu choice to the current tab. For a tab
+// backed by a file on disk, this re-reads it decoded as that encoding, for
+// when ReadFile()'s BOM/UTF-8-validity guess came out wrong. For an unsaved
+// "Untitled" tab there are no raw bytes to re-decode -- there's nothing on
+// disk yet -- so this just records the choice as the encoding to save as,
+// the same way SaveTab's file dialog records a filePath before there's
+// anything on disk at it either.
 void ClearTextFrame::OnSetEncoding(wxCommandEvent &event)
 {
     int sel = m_notebook->GetSelection();
@@ -956,9 +963,8 @@ void ClearTextFrame::OnSetEncoding(wxCommandEvent &event)
 
     if (m_tabData[sel].filePath.IsEmpty())
     {
-        wxMessageBox("This tab isn't backed by a file on disk, so there's no "
-            "raw bytes to re-decode.", "No File to Re-Decode", wxOK | wxICON_INFORMATION, this);
-        UpdateEncodingMenuChecks(); // put the checkmark back where it was
+        m_tabData[sel].encoding = encodings[idx];
+        UpdateEncodingMenuChecks();
         return;
     }
 
@@ -1035,7 +1041,7 @@ bool ClearTextFrame::SaveTab(int index)
     if (m_trimTrailingWhitespace)
         TrimTrailingWhitespace(stc);
 
-    if (!TextEncoding::WriteFile(m_tabData[index].filePath, stc->GetText()))
+    if (!TextEncoding::WriteFile(m_tabData[index].filePath, stc->GetText(), EffectiveEncoding(index)))
     {
         wxMessageBox("Failed to save file.", "Error", wxOK | wxICON_ERROR, this);
         return false;
@@ -1413,6 +1419,50 @@ void ClearTextFrame::OnAbout(wxCommandEvent &event)
         "OTHER DEALINGS IN THE SOFTWARE."
     );
     wxAboutBox(info, this);
+}
+
+// Reports counts for the selection if there is one, otherwise the whole
+// document -- same "selection wins if present" convention OnCopyAsHtml
+// and OnPrint already use.
+void ClearTextFrame::OnStatistics(wxCommandEvent &event)
+{
+    int sel = m_notebook->GetSelection();
+    if (sel == wxNOT_FOUND || IsAddTabPage(sel)) return;
+
+    wxStyledTextCtrl *stc = PageText(sel);
+    bool hasSelection = !stc->GetSelectedText().IsEmpty();
+    wxString text = hasSelection ? stc->GetSelectedText() : stc->GetText();
+
+    long lines = hasSelection ? (long)wxSplit(text, '\n').size() : (long)stc->GetLineCount();
+    long chars = (long)text.length();
+    long charsNoSpaces = 0;
+    long words = 0;
+    bool inWord = false;
+    for (size_t i = 0; i < text.length(); i++)
+    {
+        if (wxIsspace(text[i]))
+        {
+            inWord = false;
+        }
+        else
+        {
+            charsNoSpaces++;
+            if (!inWord)
+            {
+                words++;
+                inWord = true;
+            }
+        }
+    }
+
+    wxString message = wxString::Format(
+        "%s\n\n"
+        "Lines: %ld\n"
+        "Words: %ld\n"
+        "Characters (with spaces): %ld\n"
+        "Characters (without spaces): %ld",
+        hasSelection ? "Selection" : "Document", lines, words, chars, charsNoSpaces);
+    wxMessageBox(message, "Statistics", wxOK | wxICON_INFORMATION, this);
 }
 
 // ============================================================================

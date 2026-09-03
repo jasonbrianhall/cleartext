@@ -176,6 +176,9 @@ private:
 
     void OnPrint(wxCommandEvent &event);
     void OnAbout(wxCommandEvent &event);
+    // Shows line/word/character counts for the current tab -- the whole
+    // document, or just the selection when one is active.
+    void OnStatistics(wxCommandEvent &event);
 
     // --- Find / replace / go to line / find in files ---
     bool FindInEditor(wxStyledTextCtrl *stc, const wxString &text, int flags, bool forward);
