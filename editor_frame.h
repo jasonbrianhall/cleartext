@@ -91,6 +91,10 @@ private:
     wxStyledTextCtrl *PageText(int index);
     void SetupEditor(wxStyledTextCtrl *stc);
     void UpdateMarginWidth(wxStyledTextCtrl *stc);
+    // Forces Scintilla to (re)compute fold levels for the whole document
+    // -- see the .cpp for why this is needed at all. Call after SetText
+    // or ApplyHighlighting.
+    void RefreshFolding(wxStyledTextCtrl *stc);
     void AddTab(const wxString &title, const wxString &content = "", const wxString &filePath = "",
                 TextEncoding::Encoding detectedEncoding = TextEncoding::Encoding::Utf8);
     void UpdateTabLabel(int index);
@@ -114,6 +118,16 @@ private:
     void UpdateStatusBarPosition(wxStyledTextCtrl *stc);
     void OnMarginClick(wxStyledTextEvent &event);
     void OnEditorContextMenu(wxContextMenuEvent &event);
+    // Auto-closes brackets/quotes as they're typed: intercepted here
+    // (before Scintilla inserts the character) so a selection can be
+    // wrapped instead of replaced, and typing a closer that's already
+    // there just steps over it instead of doubling it up.
+    void OnEditorChar(wxKeyEvent &event);
+    // Auto-closes an HTML/XML tag right after its opening ">" is typed
+    // (skipped for closing tags, self-closing tags, and void elements
+    // like <br>). Runs after insertion, unlike OnEditorChar, since it
+    // needs to see the tag name that was just typed.
+    void OnEditorCharAdded(wxStyledTextEvent &event);
     void OnPageChanged(wxAuiNotebookEvent &event);
     void OnPageClose(wxAuiNotebookEvent &event);
     void OnPageBeginDrag(wxAuiNotebookEvent &event);

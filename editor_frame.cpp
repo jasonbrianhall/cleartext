@@ -26,6 +26,32 @@ namespace
         return ch == '(' || ch == ')' || ch == '[' || ch == ']' || ch == '{' || ch == '}';
     }
 
+    // Used by OnEditorChar to avoid auto-pairing a quote that's actually an
+    // apostrophe in the middle of a word (e.g. typing the ' in "don't").
+    bool IsIdentChar(int ch)
+    {
+        return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+               (ch >= '0' && ch <= '9') || ch == '_';
+    }
+
+    struct BracketPair { char open, close; };
+    const BracketPair kAutoCloseBrackets[] = { {'(', ')'}, {'[', ']'}, {'{', '}'} };
+
+    // HTML void elements: they're never written with a separate closing
+    // tag (with or without a trailing "/"), so OnEditorCharAdded's tag
+    // auto-close leaves them alone.
+    bool IsVoidHtmlElement(const wxString &tagName)
+    {
+        static const wxString voidElements[] = {
+            "area", "base", "br", "col", "embed", "hr", "img", "input",
+            "link", "meta", "param", "source", "track", "wbr"
+        };
+        wxString lower = tagName.Lower();
+        for (const wxString &v : voidElements)
+            if (lower == v) return true;
+        return false;
+    }
+
     enum
     {
         ID_NewTab = wxID_HIGHEST + 1,
@@ -448,6 +474,22 @@ void ClearTextFrame::UpdateMarginWidth(wxStyledTextCtrl *stc)
     stc->SetMarginWidth(0, stc->TextWidth(wxSTC_STYLE_LINENUMBER, widest));
 }
 
+// Forces Scintilla to (re)compute fold levels for the whole document.
+// SetupEditor's "fold" property is set once, before any lexer or text
+// exists on the control; the very first auto-styling pass Scintilla runs
+// once text actually lands (as part of SetText) doesn't retroactively
+// pick that property up, so the fold margin comes back completely empty
+// -- no fold points anywhere -- even though ordinary syntax coloring
+// works fine. Re-asserting the property invalidates that stale pass, and
+// Colourise(0, -1) then does a synchronous full-document re-lex that
+// actually produces fold levels. Call this after any SetText or
+// ApplyHighlighting call.
+void ClearTextFrame::RefreshFolding(wxStyledTextCtrl *stc)
+{
+    stc->SetProperty("fold", "1");
+    stc->Colourise(0, -1);
+}
+
 void ClearTextFrame::AddTab(const wxString &title, const wxString &content, const wxString &filePath,
                              TextEncoding::Encoding detectedEncoding)
 {
@@ -464,6 +506,7 @@ void ClearTextFrame::AddTab(const wxString &title, const wxString &content, cons
     ApplyHighlighting(stc, EffectiveLanguage((int)m_tabData.size() - 1));
     if (!content.IsEmpty())
         stc->SetText(content);
+    RefreshFolding(stc);
     stc->EmptyUndoBuffer();
     stc->SetSavePoint(); // mark this freshly-loaded content as "unmodified"
 
@@ -473,6 +516,8 @@ void ClearTextFrame::AddTab(const wxString &title, const wxString &content, cons
     stc->Bind(wxEVT_MOUSEWHEEL, &ClearTextFrame::OnMouseWheel, this);
     stc->Bind(wxEVT_STC_UPDATEUI, &ClearTextFrame::OnEditorUpdateUI, this);
     stc->Bind(wxEVT_STC_MARGINCLICK, &ClearTextFrame::OnMarginClick, this);
+    stc->Bind(wxEVT_CHAR, &ClearTextFrame::OnEditorChar, this);
+    stc->Bind(wxEVT_STC_CHARADDED, &ClearTextFrame::OnEditorCharAdded, this);
     stc->Bind(wxEVT_CONTEXT_MENU, &ClearTextFrame::OnEditorContextMenu, this);
     stc->SetDropTarget(new FileDropTarget(this));
 
@@ -669,6 +714,138 @@ void ClearTextFrame::OnMarginClick(wxStyledTextEvent &event)
     stc->ToggleFold(stc->LineFromPosition(event.GetPosition()));
 }
 
+void ClearTextFrame::OnEditorChar(wxKeyEvent &event)
+{
+    wxStyledTextCtrl *stc = (wxStyledTextCtrl*)event.GetEventObject();
+    int key = event.GetUnicodeKey();
+
+    // Only plain typing -- shortcuts like Ctrl+9 shouldn't trigger this.
+    if (event.ControlDown() || event.AltDown() || event.MetaDown() || key == (int)WXK_NONE)
+    {
+        event.Skip();
+        return;
+    }
+
+    int pos = stc->GetCurrentPos();
+    bool hasSelection = stc->GetSelectionStart() != stc->GetSelectionEnd();
+
+    for (const BracketPair &b : kAutoCloseBrackets)
+    {
+        // Typing the closer that's already sitting right where we'd type
+        // it (almost always one we auto-inserted ourselves) just steps
+        // over it instead of typing a redundant second one.
+        if (key == (unsigned char)b.close && !hasSelection)
+        {
+            if (pos < stc->GetTextLength() && stc->GetCharAt(pos) == (unsigned char)b.close)
+            {
+                stc->GotoPos(pos + 1);
+                return;
+            }
+            event.Skip();
+            return;
+        }
+
+        if (key == (unsigned char)b.open)
+        {
+            stc->BeginUndoAction();
+            if (hasSelection)
+            {
+                int start = stc->GetSelectionStart();
+                int end = stc->GetSelectionEnd();
+                wxString inner = stc->GetTextRange(start, end);
+                stc->ReplaceSelection(wxString(b.open) + inner + wxString(b.close));
+                stc->SetSelection(start + 1, start + 1 + (int)inner.length());
+            }
+            else
+            {
+                stc->InsertText(pos, wxString(b.open) + wxString(b.close));
+                stc->GotoPos(pos + 1);
+            }
+            stc->EndUndoAction();
+            return;
+        }
+    }
+
+    if (key == '"' || key == '\'')
+    {
+        char q = (char)key;
+
+        if (!hasSelection && pos < stc->GetTextLength() && stc->GetCharAt(pos) == q)
+        {
+            stc->GotoPos(pos + 1);
+            return;
+        }
+        // Mid-word: almost certainly an apostrophe (don't, it's, ...),
+        // not the start of a quoted string, so don't auto-pair it.
+        if (!hasSelection && pos > 0 && IsIdentChar(stc->GetCharAt(pos - 1)))
+        {
+            event.Skip();
+            return;
+        }
+
+        stc->BeginUndoAction();
+        if (hasSelection)
+        {
+            int start = stc->GetSelectionStart();
+            int end = stc->GetSelectionEnd();
+            wxString inner = stc->GetTextRange(start, end);
+            stc->ReplaceSelection(wxString(q) + inner + wxString(q));
+            stc->SetSelection(start + 1, start + 1 + (int)inner.length());
+        }
+        else
+        {
+            stc->InsertText(pos, wxString(q) + wxString(q));
+            stc->GotoPos(pos + 1);
+        }
+        stc->EndUndoAction();
+        return;
+    }
+
+    event.Skip();
+}
+
+// Auto-closes an HTML/XML tag right after its opening ">" is typed.
+void ClearTextFrame::OnEditorCharAdded(wxStyledTextEvent &event)
+{
+    if (event.GetKey() != '>') return;
+
+    wxStyledTextCtrl *stc = (wxStyledTextCtrl*)event.GetEventObject();
+    int idx = IndexOf(stc);
+    if (idx < 0) return;
+
+    Language lang = EffectiveLanguage(idx);
+    if (lang != Language::Html && lang != Language::Xml) return;
+
+    int pos = stc->GetCurrentPos(); // just after the '>' that was typed
+    int scanStart = wxMax(0, pos - 2000); // bounded lookback, not a full-doc scan
+    wxString before = stc->GetTextRange(scanStart, pos - 1); // up to, not incl., the '>'
+
+    int ltIndex = before.Find('<', true); // last '<' before it
+    if (ltIndex == wxNOT_FOUND) return;
+
+    wxString afterLt = before.Mid(ltIndex + 1);
+    // A '>' already inside that span means the last '<' was already
+    // closed by something else (e.g. plain text like "a>b>"), so this
+    // isn't actually the closing ">" of a tag.
+    if (afterLt.Find('>') != wxNOT_FOUND) return;
+    if (afterLt.IsEmpty() || afterLt[0] == '/') return;   // "</div>": a closing tag
+    if (afterLt.Last() == '/') return;                    // "<br/>": self-closing
+
+    wxString tagName;
+    for (size_t i = 0; i < afterLt.length(); i++)
+    {
+        wxUniChar c = afterLt[i];
+        if (wxIsalnum(c) || c == '_' || c == '-' || c == ':')
+            tagName += c;
+        else
+            break;
+    }
+    if (tagName.IsEmpty() || IsVoidHtmlElement(tagName)) return;
+
+    stc->InsertText(pos, "</" + tagName + ">");
+    stc->GotoPos(pos); // leave the caret right after ">", before the closing tag
+}
+
 // Right-click (or the keyboard Menu key) context menu for the editor.
 // Reuses the same command ids as the Edit menu -- wxEVT_MENU from a popup
 // shown on a child window propagates up to the frame's own Bind()s, so no
@@ -830,6 +1007,7 @@ void ClearTextFrame::ReapplyHighlightingToAllTabs()
     {
         wxStyledTextCtrl *stc = PageText((int)i);
         ApplyHighlighting(stc, EffectiveLanguage((int)i));
+        RefreshFolding(stc);
         UpdateMarginWidth(stc);
     }
 }
@@ -942,6 +1120,7 @@ void ClearTextFrame::OnSetLanguage(wxCommandEvent &event)
 
     m_tabData[sel].language = languages[idx].id;
     ApplyHighlighting(PageText(sel), EffectiveLanguage(sel));
+    RefreshFolding(PageText(sel));
     UpdateMarginWidth(PageText(sel));
 }
 
@@ -1035,6 +1214,7 @@ bool ClearTextFrame::SaveTab(int index)
         if (dlg.ShowModal() == wxID_CANCEL) return false;
         m_tabData[index].filePath = dlg.GetPath();
         ApplyHighlighting(stc, EffectiveLanguage(index));
+        RefreshFolding(stc);
         UpdateMarginWidth(stc);
     }
 
@@ -1141,6 +1321,7 @@ bool ClearTextFrame::ReloadTabAs(int index, TextEncoding::Encoding encoding, boo
     wxStyledTextCtrl *stc = PageText(index);
     int firstVisible = stc->GetFirstVisibleLine();
     stc->SetText(content);
+    RefreshFolding(stc);
     stc->EmptyUndoBuffer();
     stc->SetSavePoint();
     stc->SetFirstVisibleLine(firstVisible);
